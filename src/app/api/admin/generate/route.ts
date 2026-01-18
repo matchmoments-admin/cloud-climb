@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { z } from 'zod';
 import { authOptions } from '@/lib/auth/config';
-import { generateContent } from '@/lib/ai/gemini';
+import { generateContent, AI_PROVIDERS } from '@/lib/ai/gemini';
+import type { AIProvider } from '@/lib/ai/gemini';
 import { ContentType, systemPrompts } from '@/lib/ai/system-prompts';
 
 const generateRequestSchema = z.object({
   prompt: z.string().min(10, 'Prompt must be at least 10 characters'),
   contentType: z.enum(['blog', 'exercise', 'question']),
   customSystemPrompt: z.string().optional(),
+  provider: z.enum(['gemini', 'groq']).default('gemini'),
 });
 
 export async function POST(request: Request) {
@@ -33,13 +35,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { prompt, contentType, customSystemPrompt } = validationResult.data;
+    const { prompt, contentType, customSystemPrompt, provider } = validationResult.data;
 
     // Generate content
     const content = await generateContent(
       prompt,
       contentType as ContentType,
-      customSystemPrompt
+      customSystemPrompt,
+      provider as AIProvider
     );
 
     return NextResponse.json({
@@ -94,6 +97,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       systemPrompts,
+      providers: AI_PROVIDERS,
     });
   } catch (error) {
     console.error('Error fetching system prompts:', error);

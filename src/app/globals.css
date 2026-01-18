@@ -2905,6 +2905,12 @@ a:hover {
   color: var(--color-text-secondary);
 }
 
+.ai-panel-model-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
 .ai-panel-tabs {
   display: flex;
   gap: var(--spacing-xs);

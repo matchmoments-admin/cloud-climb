@@ -6,7 +6,14 @@ import type {
   GeneratedBlogContent,
   GeneratedExerciseContent,
   GeneratedQuestionContent,
+  AIProvider,
 } from '@/lib/ai/gemini';
+
+interface ProviderInfo {
+  id: AIProvider;
+  name: string;
+  model: string;
+}
 
 interface AIGenerationPanelProps {
   onApplyBlogContent?: (content: GeneratedBlogContent) => void;
@@ -24,6 +31,11 @@ export function AIGenerationPanel({
   const [isExpanded, setIsExpanded] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [contentType, setContentType] = useState<ContentType>(defaultContentType);
+  const [provider, setProvider] = useState<AIProvider>('gemini');
+  const [providers, setProviders] = useState<ProviderInfo[]>([
+    { id: 'gemini', name: 'Gemini', model: 'gemini-2.5-flash' },
+    { id: 'groq', name: 'Groq (Llama)', model: 'llama-3.3-70b-versatile' },
+  ]);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
   const [customSystemPrompt, setCustomSystemPrompt] = useState('');
   const [defaultSystemPrompts, setDefaultSystemPrompts] = useState<Record<ContentType, string>>({
@@ -35,7 +47,7 @@ export function AIGenerationPanel({
   const [error, setError] = useState<string | null>(null);
   const [generatedContent, setGeneratedContent] = useState<any>(null);
 
-  // Fetch default system prompts on mount
+  // Fetch default system prompts and providers on mount
   useEffect(() => {
     async function fetchPrompts() {
       try {
@@ -44,6 +56,9 @@ export function AIGenerationPanel({
           const data = await res.json();
           if (data.systemPrompts) {
             setDefaultSystemPrompts(data.systemPrompts);
+          }
+          if (data.providers) {
+            setProviders(data.providers);
           }
         }
       } catch {
@@ -75,6 +90,7 @@ export function AIGenerationPanel({
         body: JSON.stringify({
           prompt,
           contentType,
+          provider,
           customSystemPrompt: customSystemPrompt !== defaultSystemPrompts[contentType]
             ? customSystemPrompt
             : undefined,
@@ -111,6 +127,8 @@ export function AIGenerationPanel({
     setPrompt('');
     setIsExpanded(false);
   };
+
+  const selectedProvider = providers.find(p => p.id === provider);
 
   return (
     <div className="ai-panel">
@@ -149,6 +167,29 @@ export function AIGenerationPanel({
 
       {isExpanded && (
         <div className="ai-panel-content">
+          {/* Provider Selector */}
+          <div className="ai-panel-row">
+            <label className="ai-panel-label">AI Provider</label>
+            <div className="ai-panel-tabs">
+              {providers.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`ai-panel-tab ${provider === p.id ? 'active' : ''}`}
+                  onClick={() => setProvider(p.id)}
+                  title={`Model: ${p.model}`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            {selectedProvider && (
+              <span className="ai-panel-model-hint">
+                Using: {selectedProvider.model}
+              </span>
+            )}
+          </div>
+
           {/* Content Type Selector */}
           <div className="ai-panel-row">
             <label className="ai-panel-label">Content Type</label>

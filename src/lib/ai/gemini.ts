@@ -1,13 +1,31 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 import { ContentType, getSystemPrompt } from './system-prompts';
 
-// Initialize client (client-side safe - API key only used server-side)
+// AI Provider types
+export type AIProvider = 'gemini' | 'groq';
+
+export const AI_PROVIDERS: { id: AIProvider; name: string; model: string }[] = [
+  { id: 'gemini', name: 'Gemini', model: 'gemini-2.5-flash' },
+  { id: 'groq', name: 'Groq (Llama)', model: 'llama-3.3-70b-versatile' },
+];
+
+// Initialize Gemini client
 function getGeminiClient() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY environment variable is not set');
   }
   return new GoogleGenerativeAI(apiKey);
+}
+
+// Initialize Groq client
+function getGroqClient() {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error('GROQ_API_KEY environment variable is not set');
+  }
+  return new Groq({ apiKey });
 }
 
 export interface GeneratedBlogContent {
@@ -44,11 +62,8 @@ export type GeneratedContent =
   | GeneratedExerciseContent
   | GeneratedQuestionContent;
 
-export async function generateContent(
-  userPrompt: string,
-  contentType: ContentType,
-  customSystemPrompt?: string
-): Promise<GeneratedContent> {
+// Generate content using Gemini
+async function generateWithGemini(prompt: string): Promise<string> {
   let genAI;
   try {
     genAI = getGeminiClient();
@@ -57,61 +72,76 @@ export async function generateContent(
   }
 
   const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-  const systemPrompt = getSystemPrompt(contentType, customSystemPrompt);
-
-  const prompt = `${systemPrompt}
-
-User Request: ${userPrompt}
-
-Remember to output ONLY valid JSON matching the schema above. No markdown code blocks, just the raw JSON.`;
 
   let result;
   try {
     result = await model.generateContent(prompt);
   } catch (error: any) {
-    // Log full error for debugging
     console.error('[Gemini] Full error:', error);
-
-    // Handle specific Gemini API errors
     const message = error?.message || String(error);
-    const errorDetails = error?.errorDetails || error?.response?.data || null;
-
-    console.error('[Gemini] Error message:', message);
-    if (errorDetails) {
-      console.error('[Gemini] Error details:', JSON.stringify(errorDetails));
-    }
 
     if (message.includes('API_KEY_INVALID') || message.includes('API key not valid')) {
-      throw new Error('Invalid Gemini API key. Please check your GEMINI_API_KEY in Vercel environment variables.');
+      throw new Error('Invalid Gemini API key. Please check your GEMINI_API_KEY.');
     }
     if (message.includes('quota') || message.includes('rate limit') || message.includes('429')) {
-      throw new Error('Gemini API rate limit exceeded. Please wait a moment and try again.');
+      throw new Error('Gemini rate limit exceeded. Try switching to Groq or wait a moment.');
     }
     if (message.includes('safety') || message.includes('blocked') || message.includes('SAFETY')) {
-      throw new Error('Content was blocked by Gemini safety filters. Try rephrasing your prompt.');
+      throw new Error('Content blocked by Gemini safety filters. Try rephrasing your prompt.');
     }
     if (message.includes('RECITATION')) {
-      throw new Error('Content was blocked due to potential copyright concerns. Try a more original prompt.');
+      throw new Error('Content blocked due to copyright concerns. Try a more original prompt.');
     }
-    if (message.includes('timeout') || message.includes('DEADLINE_EXCEEDED')) {
-      throw new Error('Gemini API request timed out. Please try again.');
-    }
-    if (message.includes('Failed to fetch') || message.includes('ENOTFOUND') || message.includes('ECONNREFUSED')) {
-      throw new Error('Cannot connect to Gemini API. Check network/firewall settings.');
-    }
-
-    // Show the actual error message for debugging
     throw new Error(`Gemini error: ${message}`);
   }
 
   const response = await result.response;
-  const text = response.text();
+  return response.text();
+}
 
-  if (!text || text.trim().length === 0) {
-    throw new Error('Gemini returned an empty response. Please try a different prompt.');
+// Generate content using Groq
+async function generateWithGroq(prompt: string): Promise<string> {
+  let groq;
+  try {
+    groq = getGroqClient();
+  } catch (error) {
+    throw new Error('Groq API key is not configured. Please add GROQ_API_KEY to environment variables.');
   }
 
-  // Parse the JSON response
+  try {
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.7,
+      max_tokens: 4096,
+    });
+
+    return completion.choices[0]?.message?.content || '';
+  } catch (error: any) {
+    console.error('[Groq] Full error:', error);
+    const message = error?.message || String(error);
+
+    if (message.includes('invalid_api_key') || message.includes('401')) {
+      throw new Error('Invalid Groq API key. Please check your GROQ_API_KEY.');
+    }
+    if (message.includes('rate_limit') || message.includes('429')) {
+      throw new Error('Groq rate limit exceeded. Try switching to Gemini or wait a moment.');
+    }
+    throw new Error(`Groq error: ${message}`);
+  }
+}
+
+// Parse JSON from AI response
+function parseAIResponse(text: string): GeneratedContent {
+  if (!text || text.trim().length === 0) {
+    throw new Error('AI returned an empty response. Please try a different prompt.');
+  }
+
   try {
     // Try to extract JSON from the response (in case it includes markdown)
     let jsonStr = text;
@@ -129,9 +159,35 @@ Remember to output ONLY valid JSON matching the schema above. No markdown code b
     const parsed = JSON.parse(jsonStr);
     return parsed as GeneratedContent;
   } catch (error) {
-    console.error('Failed to parse Gemini response:', text.substring(0, 500));
+    console.error('Failed to parse AI response:', text.substring(0, 500));
     throw new Error('Failed to parse AI response. The model returned invalid JSON. Please try again.');
   }
+}
+
+// Main generate function with provider selection
+export async function generateContent(
+  userPrompt: string,
+  contentType: ContentType,
+  customSystemPrompt?: string,
+  provider: AIProvider = 'gemini'
+): Promise<GeneratedContent> {
+  const systemPrompt = getSystemPrompt(contentType, customSystemPrompt);
+
+  const prompt = `${systemPrompt}
+
+User Request: ${userPrompt}
+
+Remember to output ONLY valid JSON matching the schema above. No markdown code blocks, just the raw JSON.`;
+
+  let text: string;
+
+  if (provider === 'groq') {
+    text = await generateWithGroq(prompt);
+  } else {
+    text = await generateWithGemini(prompt);
+  }
+
+  return parseAIResponse(text);
 }
 
 // Type guards for checking content type
