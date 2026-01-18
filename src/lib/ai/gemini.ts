@@ -56,7 +56,7 @@ export async function generateContent(
     throw new Error('Gemini API key is not configured. Please add GEMINI_API_KEY to environment variables.');
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   const systemPrompt = getSystemPrompt(contentType, customSystemPrompt);
 
   const prompt = `${systemPrompt}
