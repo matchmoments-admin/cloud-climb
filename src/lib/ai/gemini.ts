@@ -65,26 +65,39 @@ export type GeneratedContent =
 
 // Generate content using Gemini with JSON mode for guaranteed valid output
 async function generateWithGemini(prompt: string, contentType: ContentType): Promise<string> {
+  console.log('[Gemini] Starting generation...');
+  console.log('[Gemini] Content type:', contentType);
+  console.log('[Gemini] API key exists:', !!process.env.GEMINI_API_KEY);
+  console.log('[Gemini] API key length:', process.env.GEMINI_API_KEY?.length || 0);
+
   let genAI;
   try {
     genAI = getGeminiClient();
+    console.log('[Gemini] Client initialized');
   } catch (error) {
+    console.error('[Gemini] Failed to initialize client:', error);
     throw new Error('Gemini API key is not configured. Please add GEMINI_API_KEY to environment variables.');
   }
+
+  const schema = getSchemaForContentType(contentType);
+  console.log('[Gemini] Using schema for:', contentType);
 
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
     generationConfig: {
       responseMimeType: 'application/json',
-      responseSchema: getSchemaForContentType(contentType),
+      responseSchema: schema,
     },
   });
+  console.log('[Gemini] Model configured');
 
   let result;
   try {
+    console.log('[Gemini] Sending request...');
     result = await model.generateContent(prompt);
+    console.log('[Gemini] Got result');
   } catch (error: any) {
-    console.error('[Gemini] Full error:', error);
+    console.error('[Gemini] Generation failed:', error?.message || error);
     const message = error?.message || String(error);
 
     if (message.includes('API_KEY_INVALID') || message.includes('API key not valid')) {
@@ -105,6 +118,7 @@ async function generateWithGemini(prompt: string, contentType: ContentType): Pro
   const response = result.response;
   const text = response.text();
   console.log('[Gemini] Response length:', text.length);
+  console.log('[Gemini] Response preview:', text.substring(0, 200));
   return text;
 }
 
@@ -168,15 +182,21 @@ CRITICAL REQUIREMENTS:
 
 // Parse JSON from AI response - both providers use JSON mode for reliable output
 function parseAIResponse(text: string): GeneratedContent {
+  console.log('[Parse] Starting parse, input length:', text?.length || 0);
+
   // Handle empty response
   if (!text || text.trim().length === 0) {
+    console.error('[Parse] Empty response received');
     throw new Error('AI returned an empty response. Please try again.');
   }
 
   // Clean up response - remove markdown code fences if present
   let jsonStr = text.trim();
+  console.log('[Parse] After trim, length:', jsonStr.length);
+
   const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
+    console.log('[Parse] Found markdown code fence, extracting...');
     jsonStr = jsonMatch[1].trim();
   }
 
@@ -186,32 +206,40 @@ function parseAIResponse(text: string): GeneratedContent {
     jsonStr = objectMatch[0];
   }
 
+  console.log('[Parse] Final JSON length:', jsonStr.length);
+  console.log('[Parse] First 300 chars:', jsonStr.substring(0, 300));
+
   // Parse JSON - both providers use JSON mode so this should work
   try {
     const parsed = JSON.parse(jsonStr);
+    console.log('[Parse] JSON.parse succeeded');
+    console.log('[Parse] Parsed keys:', Object.keys(parsed));
 
     // Validate that we have the required content field
     if (!parsed.body && !parsed.questionText) {
-      console.error('[Parse] Response missing content field:', Object.keys(parsed));
+      console.error('[Parse] Missing content field. Keys present:', Object.keys(parsed));
       throw new Error('Response missing required content field (body or questionText)');
     }
 
-    console.log('[Parse] Successfully parsed JSON with fields:', Object.keys(parsed).join(', '));
+    console.log('[Parse] Validation passed, returning content');
+    console.log('[Parse] Title:', parsed.title);
+    console.log('[Parse] Body length:', parsed.body?.length || 0);
     return parsed as GeneratedContent;
   } catch (error: any) {
-    // Log the first part of the response for debugging
-    console.error('[Parse] Failed to parse JSON. First 500 chars:', jsonStr.substring(0, 500));
-    console.error('[Parse] Error:', error.message);
+    console.error('[Parse] JSON.parse failed');
+    console.error('[Parse] Error type:', error.constructor.name);
+    console.error('[Parse] Error message:', error.message);
+    console.error('[Parse] First 500 chars of input:', jsonStr.substring(0, 500));
 
     // Provide a more helpful error message
     if (error.message.includes('Unexpected token')) {
-      throw new Error('AI returned malformed JSON. Please try again or switch providers.');
+      throw new Error(`AI returned malformed JSON: ${error.message}`);
     }
     if (error.message.includes('missing')) {
       throw new Error(error.message);
     }
 
-    throw new Error('Failed to parse AI response. Please try again.');
+    throw new Error(`Failed to parse AI response: ${error.message}`);
   }
 }
 
@@ -222,21 +250,31 @@ export async function generateContent(
   customSystemPrompt?: string,
   provider: AIProvider = 'gemini'
 ): Promise<GeneratedContent> {
+  console.log('[Generate] Starting content generation');
+  console.log('[Generate] Provider:', provider);
+  console.log('[Generate] Content type:', contentType);
+  console.log('[Generate] User prompt length:', userPrompt?.length || 0);
+  console.log('[Generate] Custom system prompt:', !!customSystemPrompt);
+
   const systemPrompt = getSystemPrompt(contentType, customSystemPrompt);
+  console.log('[Generate] System prompt length:', systemPrompt?.length || 0);
 
   let text: string;
 
   if (provider === 'groq') {
-    // Groq requires separate system and user messages for proper JSON mode
-    // Also needs explicit JSON template since it doesn't support schema enforcement
+    console.log('[Generate] Using Groq provider');
     text = await generateWithGroq(userPrompt, systemPrompt, contentType);
   } else {
-    // Gemini uses schema-based JSON mode with a single prompt
+    console.log('[Generate] Using Gemini provider');
     const fullPrompt = `${systemPrompt}\n\nUser Request: ${userPrompt}`;
+    console.log('[Generate] Full prompt length:', fullPrompt.length);
     text = await generateWithGemini(fullPrompt, contentType);
   }
 
-  return parseAIResponse(text);
+  console.log('[Generate] Got raw text, length:', text?.length || 0);
+  const result = parseAIResponse(text);
+  console.log('[Generate] Parse complete, returning result');
+  return result;
 }
 
 // Type guards for checking content type

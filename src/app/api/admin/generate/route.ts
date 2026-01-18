@@ -14,21 +14,34 @@ const generateRequestSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  console.log('[API /generate] POST request received');
+
   try {
     // Check authentication
+    console.log('[API /generate] Checking authentication...');
     const session = await getServerSession(authOptions);
     if (!session) {
+      console.log('[API /generate] No session found, returning 401');
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
+    console.log('[API /generate] Authenticated as:', session.user?.email);
 
     // Parse and validate request body
     const body = await request.json();
+    console.log('[API /generate] Request body:', {
+      prompt: body.prompt?.substring(0, 50) + '...',
+      contentType: body.contentType,
+      provider: body.provider,
+      hasCustomPrompt: !!body.customSystemPrompt,
+    });
+
     const validationResult = generateRequestSchema.safeParse(body);
 
     if (!validationResult.success) {
+      console.log('[API /generate] Validation failed:', validationResult.error.issues);
       return NextResponse.json(
         { error: 'Invalid request', details: validationResult.error.issues },
         { status: 400 }
@@ -36,6 +49,7 @@ export async function POST(request: Request) {
     }
 
     const { prompt, contentType, customSystemPrompt, provider } = validationResult.data;
+    console.log('[API /generate] Calling generateContent...');
 
     // Generate content
     const content = await generateContent(
@@ -45,6 +59,9 @@ export async function POST(request: Request) {
       provider as AIProvider
     );
 
+    console.log('[API /generate] Generation successful');
+    console.log('[API /generate] Content keys:', Object.keys(content));
+
     return NextResponse.json({
       success: true,
       content,
@@ -52,7 +69,8 @@ export async function POST(request: Request) {
     });
   } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    console.error('AI generation error:', errorMessage);
+    console.error('[API /generate] Error occurred:', errorMessage);
+    console.error('[API /generate] Full error:', error);
 
     // Determine appropriate status code based on error type
     let statusCode = 500;
@@ -63,6 +81,8 @@ export async function POST(request: Request) {
     } else if (errorMessage.includes('safety') || errorMessage.includes('blocked')) {
       statusCode = 422; // Unprocessable content
     }
+
+    console.error('[API /generate] Returning status:', statusCode);
 
     return NextResponse.json(
       {
