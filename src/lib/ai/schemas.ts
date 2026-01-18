@@ -130,7 +130,7 @@ export const questionSchema: Schema = {
   required: ['questionText', 'options', 'correctAnswer', 'explanation', 'sources'],
 };
 
-// Get schema by content type
+// Get schema by content type (for Gemini)
 export function getSchemaForContentType(contentType: ContentType): Schema {
   switch (contentType) {
     case 'blog':
@@ -141,5 +141,55 @@ export function getSchemaForContentType(contentType: ContentType): Schema {
       return questionSchema;
     default:
       return blogSchema;
+  }
+}
+
+// JSON templates for Groq (doesn't support schema enforcement, needs explicit examples)
+const BLOG_JSON_TEMPLATE = `{
+  "title": "Your article title here",
+  "slug": "url-friendly-slug-here",
+  "excerpt": "A 2-3 sentence summary of the article for preview cards.",
+  "body": "Full markdown content with ## headings, code blocks, and formatting.",
+  "category": "One of: Engineering, Tech, Tutorials, Study Guides, Certification Tips, News, Product",
+  "readingTime": 5,
+  "sources": [
+    {"title": "Source Name", "url": "https://example.com/doc"}
+  ]
+}`;
+
+const EXERCISE_JSON_TEMPLATE = `{
+  "title": "Exercise title",
+  "slug": "exercise-slug",
+  "excerpt": "Brief description of what this exercise teaches.",
+  "body": "Full markdown description of the problem with examples.",
+  "starterCode": "// JavaScript/TypeScript starter code with helpful comments",
+  "solutionCode": "// Complete working solution code",
+  "difficulty": "One of: Beginner, Intermediate, Advanced",
+  "sources": [
+    {"title": "Reference Documentation", "url": "https://example.com/docs"}
+  ]
+}`;
+
+const QUESTION_JSON_TEMPLATE = `{
+  "questionText": "The full question text here?",
+  "options": ["Option A", "Option B", "Option C", "Option D"],
+  "correctAnswer": 0,
+  "explanation": "Detailed explanation of why the correct answer is right.",
+  "sources": [
+    {"title": "Official Documentation", "url": "https://example.com/docs"}
+  ]
+}`;
+
+// Get JSON template for Groq prompts (string format for prompt injection)
+export function getJsonTemplateForContentType(contentType: ContentType): string {
+  switch (contentType) {
+    case 'blog':
+      return BLOG_JSON_TEMPLATE;
+    case 'exercise':
+      return EXERCISE_JSON_TEMPLATE;
+    case 'question':
+      return QUESTION_JSON_TEMPLATE;
+    default:
+      return BLOG_JSON_TEMPLATE;
   }
 }

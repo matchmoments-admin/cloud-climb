@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Groq from 'groq-sdk';
 import { ContentType, getSystemPrompt } from './system-prompts';
-import { getSchemaForContentType } from './schemas';
+import { getSchemaForContentType, getJsonTemplateForContentType } from './schemas';
 
 // AI Provider types
 export type AIProvider = 'gemini' | 'groq';
@@ -102,14 +102,14 @@ async function generateWithGemini(prompt: string, contentType: ContentType): Pro
     throw new Error(`Gemini error: ${message}`);
   }
 
-  const response = await result.response;
+  const response = result.response;
   const text = response.text();
   console.log('[Gemini] Response length:', text.length);
   return text;
 }
 
 // Generate content using Groq with proper system/user message structure
-async function generateWithGroq(userPrompt: string, systemPrompt: string): Promise<string> {
+async function generateWithGroq(userPrompt: string, systemPrompt: string, contentType: ContentType): Promise<string> {
   let groq;
   try {
     groq = getGroqClient();
@@ -117,12 +117,25 @@ async function generateWithGroq(userPrompt: string, systemPrompt: string): Promi
     throw new Error('Groq API key is not configured. Please add GROQ_API_KEY to environment variables.');
   }
 
+  // Get the JSON template for this content type - Groq needs explicit schema in prompt
+  const jsonTemplate = getJsonTemplateForContentType(contentType);
+
   try {
     const completion = await groq.chat.completions.create({
       messages: [
         {
           role: 'system',
-          content: `${systemPrompt}\n\nIMPORTANT: You MUST respond with valid JSON only. No markdown, no code fences, just raw JSON.`,
+          content: `${systemPrompt}
+
+You MUST respond with valid JSON matching this EXACT structure:
+${jsonTemplate}
+
+CRITICAL REQUIREMENTS:
+- Include ALL fields shown above
+- The "sources" field MUST be an array of objects with "title" and "url" properties
+- Do not add any extra fields
+- Do not wrap in markdown code blocks
+- Output raw JSON only`,
         },
         {
           role: 'user',
@@ -148,6 +161,7 @@ async function generateWithGroq(userPrompt: string, systemPrompt: string): Promi
     if (message.includes('rate_limit') || message.includes('429')) {
       throw new Error('Groq rate limit exceeded. Try switching to Gemini or wait a moment.');
     }
+    // Pass through the full error for debugging
     throw new Error(`Groq error: ${message}`);
   }
 }
@@ -214,7 +228,8 @@ export async function generateContent(
 
   if (provider === 'groq') {
     // Groq requires separate system and user messages for proper JSON mode
-    text = await generateWithGroq(userPrompt, systemPrompt);
+    // Also needs explicit JSON template since it doesn't support schema enforcement
+    text = await generateWithGroq(userPrompt, systemPrompt, contentType);
   } else {
     // Gemini uses schema-based JSON mode with a single prompt
     const fullPrompt = `${systemPrompt}\n\nUser Request: ${userPrompt}`;
