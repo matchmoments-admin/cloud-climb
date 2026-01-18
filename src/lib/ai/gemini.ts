@@ -49,9 +49,14 @@ export async function generateContent(
   contentType: ContentType,
   customSystemPrompt?: string
 ): Promise<GeneratedContent> {
-  const genAI = getGeminiClient();
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  let genAI;
+  try {
+    genAI = getGeminiClient();
+  } catch (error) {
+    throw new Error('Gemini API key is not configured. Please add GEMINI_API_KEY to environment variables.');
+  }
 
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const systemPrompt = getSystemPrompt(contentType, customSystemPrompt);
 
   const prompt = `${systemPrompt}
@@ -60,9 +65,42 @@ User Request: ${userPrompt}
 
 Remember to output ONLY valid JSON matching the schema above. No markdown code blocks, just the raw JSON.`;
 
-  const result = await model.generateContent(prompt);
+  let result;
+  try {
+    result = await model.generateContent(prompt);
+  } catch (error: any) {
+    // Handle specific Gemini API errors
+    const message = error?.message || String(error);
+
+    if (message.includes('API key')) {
+      throw new Error('Invalid Gemini API key. Please check your GEMINI_API_KEY.');
+    }
+    if (message.includes('quota') || message.includes('rate limit')) {
+      throw new Error('Gemini API rate limit exceeded. Please wait a moment and try again.');
+    }
+    if (message.includes('safety') || message.includes('blocked')) {
+      throw new Error('Content was blocked by Gemini safety filters. Try rephrasing your prompt.');
+    }
+    if (message.includes('RECITATION')) {
+      throw new Error('Content was blocked due to potential copyright concerns. Try a more original prompt.');
+    }
+    if (message.includes('timeout') || message.includes('DEADLINE_EXCEEDED')) {
+      throw new Error('Gemini API request timed out. Please try again.');
+    }
+    if (message.includes('network') || message.includes('fetch')) {
+      throw new Error('Network error connecting to Gemini API. Please check your connection.');
+    }
+
+    // Re-throw with original message if no specific match
+    throw new Error(`Gemini API error: ${message}`);
+  }
+
   const response = await result.response;
   const text = response.text();
+
+  if (!text || text.trim().length === 0) {
+    throw new Error('Gemini returned an empty response. Please try a different prompt.');
+  }
 
   // Parse the JSON response
   try {
@@ -82,8 +120,8 @@ Remember to output ONLY valid JSON matching the schema above. No markdown code b
     const parsed = JSON.parse(jsonStr);
     return parsed as GeneratedContent;
   } catch (error) {
-    console.error('Failed to parse Gemini response:', text);
-    throw new Error('Failed to parse AI response as JSON');
+    console.error('Failed to parse Gemini response:', text.substring(0, 500));
+    throw new Error('Failed to parse AI response. The model returned invalid JSON. Please try again.');
   }
 }
 

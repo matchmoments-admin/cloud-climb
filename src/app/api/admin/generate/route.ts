@@ -47,14 +47,26 @@ export async function POST(request: Request) {
       content,
       contentType,
     });
-  } catch (error) {
-    console.error('AI generation error:', error);
+  } catch (error: any) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error('AI generation error:', errorMessage);
+
+    // Determine appropriate status code based on error type
+    let statusCode = 500;
+    if (errorMessage.includes('API key')) {
+      statusCode = 503; // Service unavailable - config issue
+    } else if (errorMessage.includes('rate limit') || errorMessage.includes('quota')) {
+      statusCode = 429; // Too many requests
+    } else if (errorMessage.includes('safety') || errorMessage.includes('blocked')) {
+      statusCode = 422; // Unprocessable content
+    }
+
     return NextResponse.json(
       {
-        error: 'Failed to generate content',
-        message: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
+        message: errorMessage,
       },
-      { status: 500 }
+      { status: statusCode }
     );
   }
 }
