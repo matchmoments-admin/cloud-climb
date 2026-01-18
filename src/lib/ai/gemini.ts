@@ -103,11 +103,13 @@ async function generateWithGemini(prompt: string, contentType: ContentType): Pro
   }
 
   const response = await result.response;
-  return response.text();
+  const text = response.text();
+  console.log('[Gemini] Response length:', text.length);
+  return text;
 }
 
-// Generate content using Groq
-async function generateWithGroq(prompt: string): Promise<string> {
+// Generate content using Groq with proper system/user message structure
+async function generateWithGroq(userPrompt: string, systemPrompt: string): Promise<string> {
   let groq;
   try {
     groq = getGroqClient();
@@ -119,16 +121,23 @@ async function generateWithGroq(prompt: string): Promise<string> {
     const completion = await groq.chat.completions.create({
       messages: [
         {
+          role: 'system',
+          content: `${systemPrompt}\n\nIMPORTANT: You MUST respond with valid JSON only. No markdown, no code fences, just raw JSON.`,
+        },
+        {
           role: 'user',
-          content: prompt,
+          content: userPrompt,
         },
       ],
       model: 'llama-3.3-70b-versatile',
       temperature: 0.7,
       max_tokens: 4096,
+      response_format: { type: 'json_object' },
     });
 
-    return completion.choices[0]?.message?.content || '';
+    const content = completion.choices[0]?.message?.content || '';
+    console.log('[Groq] Response length:', content.length);
+    return content;
   } catch (error: any) {
     console.error('[Groq] Full error:', error);
     const message = error?.message || String(error);
@@ -143,108 +152,52 @@ async function generateWithGroq(prompt: string): Promise<string> {
   }
 }
 
-// Parse JSON from AI response with robust error handling
+// Parse JSON from AI response - both providers use JSON mode for reliable output
 function parseAIResponse(text: string): GeneratedContent {
+  // Handle empty response
   if (!text || text.trim().length === 0) {
-    throw new Error('AI returned an empty response. Please try a different prompt.');
+    throw new Error('AI returned an empty response. Please try again.');
   }
 
-  // Try to extract JSON from markdown code fences
-  let jsonStr = text;
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  // Clean up response - remove markdown code fences if present
+  let jsonStr = text.trim();
+  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
     jsonStr = jsonMatch[1].trim();
   }
 
-  // Find the JSON object boundaries
+  // Find JSON object if there's extra text
   const objectMatch = jsonStr.match(/\{[\s\S]*\}/);
   if (objectMatch) {
     jsonStr = objectMatch[0];
   }
 
-  // Try direct parsing first
+  // Parse JSON - both providers use JSON mode so this should work
   try {
     const parsed = JSON.parse(jsonStr);
+
+    // Validate that we have the required content field
+    if (!parsed.body && !parsed.questionText) {
+      console.error('[Parse] Response missing content field:', Object.keys(parsed));
+      throw new Error('Response missing required content field (body or questionText)');
+    }
+
+    console.log('[Parse] Successfully parsed JSON with fields:', Object.keys(parsed).join(', '));
     return parsed as GeneratedContent;
-  } catch (firstError) {
-    console.log('Direct JSON parse failed, attempting repair...');
-  }
+  } catch (error: any) {
+    // Log the first part of the response for debugging
+    console.error('[Parse] Failed to parse JSON. First 500 chars:', jsonStr.substring(0, 500));
+    console.error('[Parse] Error:', error.message);
 
-  // Try to repair common JSON issues
-  try {
-    // Extract fields manually using regex for robustness
-    const extractField = (fieldName: string, isNumber = false): string | number | null => {
-      const pattern = isNumber
-        ? new RegExp(`"${fieldName}"\\s*:\\s*(\\d+)`)
-        : new RegExp(`"${fieldName}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, 's');
-      const match = jsonStr.match(pattern);
-      if (match) {
-        return isNumber ? parseInt(match[1], 10) : match[1];
-      }
-      return null;
-    };
-
-    // Extract body field specially (it's usually the problematic one)
-    const bodyMatch = jsonStr.match(/"body"\s*:\s*"([\s\S]*?)"\s*,\s*"category"/);
-    let bodyContent = '';
-    if (bodyMatch) {
-      bodyContent = bodyMatch[1];
+    // Provide a more helpful error message
+    if (error.message.includes('Unexpected token')) {
+      throw new Error('AI returned malformed JSON. Please try again or switch providers.');
+    }
+    if (error.message.includes('missing')) {
+      throw new Error(error.message);
     }
 
-    // Extract sources array
-    const sourcesMatch = jsonStr.match(/"sources"\s*:\s*(\[[\s\S]*?\])\s*\}?\s*$/);
-    let sources: Array<{ title: string; url: string }> = [];
-    if (sourcesMatch) {
-      try {
-        sources = JSON.parse(sourcesMatch[1]);
-      } catch {
-        sources = [];
-      }
-    }
-
-    // Build the object manually
-    const result: any = {
-      title: extractField('title') || 'Untitled',
-      slug: extractField('slug') || 'untitled',
-      excerpt: extractField('excerpt') || '',
-      body: bodyContent,
-      category: extractField('category') || 'Tutorials',
-      readingTime: extractField('readingTime', true) || 5,
-      sources,
-    };
-
-    // For questions
-    if (jsonStr.includes('"questionText"')) {
-      result.questionText = extractField('questionText') || '';
-      result.explanation = extractField('explanation') || '';
-      result.correctAnswer = extractField('correctAnswer', true) || 0;
-
-      const optionsMatch = jsonStr.match(/"options"\s*:\s*(\[[\s\S]*?\])/);
-      if (optionsMatch) {
-        try {
-          result.options = JSON.parse(optionsMatch[1]);
-        } catch {
-          result.options = [];
-        }
-      }
-    }
-
-    // For exercises
-    if (jsonStr.includes('"starterCode"')) {
-      result.starterCode = extractField('starterCode') || '';
-      result.solutionCode = extractField('solutionCode') || '';
-      result.difficulty = extractField('difficulty') || 'Intermediate';
-    }
-
-    if (result.body || result.questionText) {
-      console.log('JSON repair successful');
-      return result as GeneratedContent;
-    }
-
-    throw new Error('Could not extract content from response');
-  } catch (repairError) {
-    console.error('Failed to parse AI response:', text.substring(0, 1000));
-    throw new Error('Failed to parse AI response. The model returned invalid JSON. Please try again.');
+    throw new Error('Failed to parse AI response. Please try again.');
   }
 }
 
@@ -257,24 +210,15 @@ export async function generateContent(
 ): Promise<GeneratedContent> {
   const systemPrompt = getSystemPrompt(contentType, customSystemPrompt);
 
-  // For Gemini, JSON structure is enforced by responseSchema - no need for JSON instructions
-  // For Groq, we still need to include JSON format instructions in the prompt
-  const prompt = provider === 'groq'
-    ? `${systemPrompt}
-
-User Request: ${userPrompt}
-
-Output your response as valid JSON. Do not wrap in markdown code blocks.`
-    : `${systemPrompt}
-
-User Request: ${userPrompt}`;
-
   let text: string;
 
   if (provider === 'groq') {
-    text = await generateWithGroq(prompt);
+    // Groq requires separate system and user messages for proper JSON mode
+    text = await generateWithGroq(userPrompt, systemPrompt);
   } else {
-    text = await generateWithGemini(prompt, contentType);
+    // Gemini uses schema-based JSON mode with a single prompt
+    const fullPrompt = `${systemPrompt}\n\nUser Request: ${userPrompt}`;
+    text = await generateWithGemini(fullPrompt, contentType);
   }
 
   return parseAIResponse(text);
