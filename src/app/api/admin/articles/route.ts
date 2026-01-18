@@ -9,6 +9,11 @@ import type { SF_Article__c } from '@/types/salesforce/raw';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// Escape single quotes for SOQL to prevent injection
+function escapeSOQL(value: string): string {
+  return value.replace(/'/g, "\\'");
+}
+
 // Fields to retrieve for list view
 const ARTICLE_LIST_FIELDS = `
   Id, Name, Heading__c, Subtitle__c, Excerpt__c, Slug__c,
@@ -43,7 +48,7 @@ export async function GET(request: NextRequest) {
       conditions.push(`Status__c = '${status}'`);
     }
     if (category) {
-      conditions.push(`Category__c = '${category}'`);
+      conditions.push(`Category__c = '${escapeSOQL(category)}'`);
     }
     if (search) {
       // Escape single quotes for SOQL
@@ -128,8 +133,10 @@ export async function POST(request: NextRequest) {
 
     // Check for slug uniqueness
     const client = getSalesforceClient();
+    const slugValue = String(sfData.Slug__c || '');
+    const escapedSlug = escapeSOQL(slugValue);
     const existingSlug = await client.query<SF_Article__c>(
-      `SELECT Id FROM Article__c WHERE Slug__c = '${sfData.Slug__c}' LIMIT 1`
+      `SELECT Id FROM Article__c WHERE Slug__c = '${escapedSlug}' LIMIT 1`
     );
 
     if (existingSlug.length > 0) {

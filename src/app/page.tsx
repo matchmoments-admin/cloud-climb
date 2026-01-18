@@ -163,9 +163,9 @@ const mockArticles: Article[] = [
 const defaultCategories = ['Engineering', 'Tutorials', 'Certification Tips', 'Tech'];
 
 async function getArticlesData() {
-  // Use mock data for consistent display while Salesforce images are being configured
-  // TODO: Remove this flag once Salesforce articles have proper images
-  const USE_MOCK_DATA = true;
+  // Set to false to use real Salesforce data
+  // Falls back to mock data if Salesforce fails or returns empty
+  const USE_MOCK_DATA = false;
 
   if (USE_MOCK_DATA) {
     return { articles: mockArticles, categories: defaultCategories };

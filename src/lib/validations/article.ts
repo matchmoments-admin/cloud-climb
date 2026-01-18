@@ -87,7 +87,9 @@ export const articleCreateSchema = z.object({
     .default(false),
   articleDate: z
     .string()
-    .datetime()
+    .refine((val) => !val || /^\d{4}-\d{2}-\d{2}(T.*)?$/.test(val), {
+      message: 'Invalid date format',
+    })
     .optional()
     .nullable(),
   readingTime: z

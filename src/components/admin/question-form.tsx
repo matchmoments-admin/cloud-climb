@@ -2,8 +2,10 @@
 
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { AIGenerationPanel } from '@/components/admin/ai-generation-panel';
 import type { Question, Answer, TestCase, QuestionType } from '@/types/domain';
 import type { AnswerInput, TestCaseInput } from '@/lib/validations/question';
+import type { GeneratedQuestionContent } from '@/lib/ai/gemini';
 
 interface QuestionFormProps {
   question?: Question;
@@ -96,6 +98,25 @@ export function QuestionForm({ question, mode }: QuestionFormProps) {
     },
     []
   );
+
+  // Handle AI-generated question content
+  const handleApplyQuestionContent = useCallback((content: GeneratedQuestionContent) => {
+    setFormData((prev) => ({
+      ...prev,
+      questionText: content.questionText || prev.questionText,
+      explanation: content.explanation || prev.explanation,
+    }));
+
+    // Apply options as answers if provided
+    if (content.options && content.options.length > 0) {
+      const newAnswers: AnswerInput[] = content.options.map((opt, index) => ({
+        answerText: opt,
+        isCorrect: index === content.correctAnswer,
+        sortOrder: index,
+      }));
+      setAnswers(newAnswers);
+    }
+  }, []);
 
   // Check if question type needs answers
   const needsAnswers = ['Multiple_Choice', 'True_False', 'Multiple_Select'].includes(
@@ -236,6 +257,14 @@ export function QuestionForm({ question, mode }: QuestionFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="article-form">
+      {/* AI Content Generator */}
+      <div className="article-form-ai">
+        <AIGenerationPanel
+          onApplyQuestionContent={handleApplyQuestionContent}
+          defaultContentType="question"
+        />
+      </div>
+
       <div className="article-form-main">
         {/* Question Text */}
         <div className="form-field">
