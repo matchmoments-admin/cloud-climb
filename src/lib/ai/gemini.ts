@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Groq from 'groq-sdk';
 import { ContentType, getSystemPrompt } from './system-prompts';
+import { getSchemaForContentType } from './schemas';
 
 // AI Provider types
 export type AIProvider = 'gemini' | 'groq';
@@ -62,8 +63,8 @@ export type GeneratedContent =
   | GeneratedExerciseContent
   | GeneratedQuestionContent;
 
-// Generate content using Gemini
-async function generateWithGemini(prompt: string): Promise<string> {
+// Generate content using Gemini with JSON mode for guaranteed valid output
+async function generateWithGemini(prompt: string, contentType: ContentType): Promise<string> {
   let genAI;
   try {
     genAI = getGeminiClient();
@@ -71,7 +72,13 @@ async function generateWithGemini(prompt: string): Promise<string> {
     throw new Error('Gemini API key is not configured. Please add GEMINI_API_KEY to environment variables.');
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: getSchemaForContentType(contentType),
+    },
+  });
 
   let result;
   try {
@@ -250,18 +257,24 @@ export async function generateContent(
 ): Promise<GeneratedContent> {
   const systemPrompt = getSystemPrompt(contentType, customSystemPrompt);
 
-  const prompt = `${systemPrompt}
+  // For Gemini, JSON structure is enforced by responseSchema - no need for JSON instructions
+  // For Groq, we still need to include JSON format instructions in the prompt
+  const prompt = provider === 'groq'
+    ? `${systemPrompt}
 
 User Request: ${userPrompt}
 
-Remember to output ONLY valid JSON matching the schema above. No markdown code blocks, just the raw JSON.`;
+Output your response as valid JSON. Do not wrap in markdown code blocks.`
+    : `${systemPrompt}
+
+User Request: ${userPrompt}`;
 
   let text: string;
 
   if (provider === 'groq') {
     text = await generateWithGroq(prompt);
   } else {
-    text = await generateWithGemini(prompt);
+    text = await generateWithGemini(prompt, contentType);
   }
 
   return parseAIResponse(text);
