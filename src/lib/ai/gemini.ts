@@ -136,30 +136,107 @@ async function generateWithGroq(prompt: string): Promise<string> {
   }
 }
 
-// Parse JSON from AI response
+// Parse JSON from AI response with robust error handling
 function parseAIResponse(text: string): GeneratedContent {
   if (!text || text.trim().length === 0) {
     throw new Error('AI returned an empty response. Please try a different prompt.');
   }
 
+  // Try to extract JSON from markdown code fences
+  let jsonStr = text;
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1].trim();
+  }
+
+  // Find the JSON object boundaries
+  const objectMatch = jsonStr.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    jsonStr = objectMatch[0];
+  }
+
+  // Try direct parsing first
   try {
-    // Try to extract JSON from the response (in case it includes markdown)
-    let jsonStr = text;
-    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1].trim();
-    }
-
-    // Also try to find raw JSON object
-    const objectMatch = text.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
-      jsonStr = objectMatch[0];
-    }
-
     const parsed = JSON.parse(jsonStr);
     return parsed as GeneratedContent;
-  } catch (error) {
-    console.error('Failed to parse AI response:', text.substring(0, 500));
+  } catch (firstError) {
+    console.log('Direct JSON parse failed, attempting repair...');
+  }
+
+  // Try to repair common JSON issues
+  try {
+    // Extract fields manually using regex for robustness
+    const extractField = (fieldName: string, isNumber = false): string | number | null => {
+      const pattern = isNumber
+        ? new RegExp(`"${fieldName}"\\s*:\\s*(\\d+)`)
+        : new RegExp(`"${fieldName}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, 's');
+      const match = jsonStr.match(pattern);
+      if (match) {
+        return isNumber ? parseInt(match[1], 10) : match[1];
+      }
+      return null;
+    };
+
+    // Extract body field specially (it's usually the problematic one)
+    const bodyMatch = jsonStr.match(/"body"\s*:\s*"([\s\S]*?)"\s*,\s*"category"/);
+    let bodyContent = '';
+    if (bodyMatch) {
+      bodyContent = bodyMatch[1];
+    }
+
+    // Extract sources array
+    const sourcesMatch = jsonStr.match(/"sources"\s*:\s*(\[[\s\S]*?\])\s*\}?\s*$/);
+    let sources: Array<{ title: string; url: string }> = [];
+    if (sourcesMatch) {
+      try {
+        sources = JSON.parse(sourcesMatch[1]);
+      } catch {
+        sources = [];
+      }
+    }
+
+    // Build the object manually
+    const result: any = {
+      title: extractField('title') || 'Untitled',
+      slug: extractField('slug') || 'untitled',
+      excerpt: extractField('excerpt') || '',
+      body: bodyContent,
+      category: extractField('category') || 'Tutorials',
+      readingTime: extractField('readingTime', true) || 5,
+      sources,
+    };
+
+    // For questions
+    if (jsonStr.includes('"questionText"')) {
+      result.questionText = extractField('questionText') || '';
+      result.explanation = extractField('explanation') || '';
+      result.correctAnswer = extractField('correctAnswer', true) || 0;
+
+      const optionsMatch = jsonStr.match(/"options"\s*:\s*(\[[\s\S]*?\])/);
+      if (optionsMatch) {
+        try {
+          result.options = JSON.parse(optionsMatch[1]);
+        } catch {
+          result.options = [];
+        }
+      }
+    }
+
+    // For exercises
+    if (jsonStr.includes('"starterCode"')) {
+      result.starterCode = extractField('starterCode') || '';
+      result.solutionCode = extractField('solutionCode') || '';
+      result.difficulty = extractField('difficulty') || 'Intermediate';
+    }
+
+    if (result.body || result.questionText) {
+      console.log('JSON repair successful');
+      return result as GeneratedContent;
+    }
+
+    throw new Error('Could not extract content from response');
+  } catch (repairError) {
+    console.error('Failed to parse AI response:', text.substring(0, 1000));
     throw new Error('Failed to parse AI response. The model returned invalid JSON. Please try again.');
   }
 }

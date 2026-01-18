@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
@@ -23,6 +24,7 @@ export function TipTapEditor({
   className,
 }: TipTapEditorProps) {
   const lowlight = createLowlight(common);
+  const isExternalUpdate = useRef(false);
 
   const editor = useEditor({
     extensions: [
@@ -58,6 +60,11 @@ export function TipTapEditor({
     ],
     content,
     onUpdate: ({ editor }) => {
+      // Don't trigger onChange if this was an external update
+      if (isExternalUpdate.current) {
+        isExternalUpdate.current = false;
+        return;
+      }
       onChange(editor.getHTML());
     },
     editorProps: {
@@ -68,6 +75,14 @@ export function TipTapEditor({
     // Prevent SSR hydration mismatch
     immediatelyRender: false,
   });
+
+  // Sync editor content when prop changes externally (e.g., from AI generation)
+  useEffect(() => {
+    if (editor && content !== editor.getHTML()) {
+      isExternalUpdate.current = true;
+      editor.commands.setContent(content, { emitUpdate: false });
+    }
+  }, [content, editor]);
 
   return (
     <div className={`tiptap-editor ${className || ''}`}>

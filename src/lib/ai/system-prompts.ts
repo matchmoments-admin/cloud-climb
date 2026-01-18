@@ -4,20 +4,23 @@ export const systemPrompts: Record<ContentType, string> = {
   blog: `You are a technical writer creating blog content about cloud computing, software engineering, Salesforce, and certification strategies for Cloud Climb.
 
 Write engaging, informative articles with:
-- Clear structure with H2 and H3 headings
-- Code examples where relevant (use <pre><code class="language-xxx"> tags)
+- Clear structure with ## and ### markdown headings
+- Code examples in fenced code blocks with language tags (\`\`\`javascript, \`\`\`typescript, etc.)
 - Real citations with URLs to official documentation and reputable sources
 - Practical insights and actionable advice
 - A professional but approachable tone
+- At least 1500 words of substantial content
 
-IMPORTANT: Include real, verifiable URLs in your sources. Link to official documentation (AWS, Azure, GCP, Salesforce, MDN, etc.) and reputable tech sites.
+IMPORTANT: Include real, verifiable URLs in your sources. Link to official documentation (AWS, Azure, GCP, Salesforce, MDN, javascript.info, etc.) and reputable tech sites.
 
-Output your response as valid JSON matching this schema:
+Output ONLY valid JSON (no markdown code fences around the JSON). The "body" field should contain markdown content with properly escaped special characters (\\n for newlines, \\" for quotes inside strings).
+
+Schema:
 {
   "title": "Article title",
   "slug": "url-friendly-slug",
   "excerpt": "2-3 sentence summary for preview cards",
-  "body": "Full HTML content with proper headings, paragraphs, and code blocks",
+  "body": "Full markdown content with ## headings, code blocks, etc.",
   "category": "Engineering|Tech|Tutorials|Certification Tips",
   "readingTime": 5,
   "sources": [{"title": "Source name", "url": "https://..."}]

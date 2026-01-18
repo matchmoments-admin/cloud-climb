@@ -2,11 +2,18 @@
 
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { marked } from 'marked';
 import { TipTapEditor } from '@/components/editor/tiptap-editor';
 import { ImagePicker } from '@/components/editor/image-upload';
 import { AIGenerationPanel } from '@/components/admin/ai-generation-panel';
 import type { Article } from '@/types/domain';
 import type { GeneratedBlogContent, GeneratedExerciseContent } from '@/lib/ai/gemini';
+
+// Configure marked for safe HTML output
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+});
 
 interface ArticleFormProps {
   article?: Article;
@@ -57,24 +64,30 @@ export function ArticleForm({ article, mode }: ArticleFormProps) {
 
   // Handle AI-generated blog content
   const handleApplyBlogContent = useCallback((content: GeneratedBlogContent) => {
+    // Convert markdown body to HTML for TipTap editor
+    const htmlBody = content.body ? marked.parse(content.body) : '';
+
     setFormData((prev) => ({
       ...prev,
       title: content.title || prev.title,
       slug: content.slug || prev.slug,
       excerpt: content.excerpt || prev.excerpt,
-      body: content.body || prev.body,
+      body: (typeof htmlBody === 'string' ? htmlBody : '') || prev.body,
       category: content.category || prev.category,
     }));
   }, []);
 
   // Handle AI-generated exercise content
   const handleApplyExerciseContent = useCallback((content: GeneratedExerciseContent) => {
+    // Convert markdown body to HTML for TipTap editor
+    const htmlBody = content.body ? marked.parse(content.body) : '';
+
     setFormData((prev) => ({
       ...prev,
       title: content.title || prev.title,
       slug: content.slug || prev.slug,
       excerpt: content.excerpt || prev.excerpt,
-      body: content.body || prev.body,
+      body: (typeof htmlBody === 'string' ? htmlBody : '') || prev.body,
       category: 'Tutorials', // Exercises typically go in Tutorials
     }));
   }, []);
