@@ -69,16 +69,25 @@ Remember to output ONLY valid JSON matching the schema above. No markdown code b
   try {
     result = await model.generateContent(prompt);
   } catch (error: any) {
+    // Log full error for debugging
+    console.error('[Gemini] Full error:', error);
+
     // Handle specific Gemini API errors
     const message = error?.message || String(error);
+    const errorDetails = error?.errorDetails || error?.response?.data || null;
 
-    if (message.includes('API key')) {
-      throw new Error('Invalid Gemini API key. Please check your GEMINI_API_KEY.');
+    console.error('[Gemini] Error message:', message);
+    if (errorDetails) {
+      console.error('[Gemini] Error details:', JSON.stringify(errorDetails));
     }
-    if (message.includes('quota') || message.includes('rate limit')) {
+
+    if (message.includes('API_KEY_INVALID') || message.includes('API key not valid')) {
+      throw new Error('Invalid Gemini API key. Please check your GEMINI_API_KEY in Vercel environment variables.');
+    }
+    if (message.includes('quota') || message.includes('rate limit') || message.includes('429')) {
       throw new Error('Gemini API rate limit exceeded. Please wait a moment and try again.');
     }
-    if (message.includes('safety') || message.includes('blocked')) {
+    if (message.includes('safety') || message.includes('blocked') || message.includes('SAFETY')) {
       throw new Error('Content was blocked by Gemini safety filters. Try rephrasing your prompt.');
     }
     if (message.includes('RECITATION')) {
@@ -87,12 +96,12 @@ Remember to output ONLY valid JSON matching the schema above. No markdown code b
     if (message.includes('timeout') || message.includes('DEADLINE_EXCEEDED')) {
       throw new Error('Gemini API request timed out. Please try again.');
     }
-    if (message.includes('network') || message.includes('fetch')) {
-      throw new Error('Network error connecting to Gemini API. Please check your connection.');
+    if (message.includes('Failed to fetch') || message.includes('ENOTFOUND') || message.includes('ECONNREFUSED')) {
+      throw new Error('Cannot connect to Gemini API. Check network/firewall settings.');
     }
 
-    // Re-throw with original message if no specific match
-    throw new Error(`Gemini API error: ${message}`);
+    // Show the actual error message for debugging
+    throw new Error(`Gemini error: ${message}`);
   }
 
   const response = await result.response;
