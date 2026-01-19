@@ -134,6 +134,33 @@ async function generateWithGroq(userPrompt: string, systemPrompt: string, conten
   // Get the JSON template for this content type - Groq needs explicit schema in prompt
   const jsonTemplate = getJsonTemplateForContentType(contentType);
 
+  // Build detailed field requirements based on content type
+  const fieldRequirements = contentType === 'blog'
+    ? `FIELD REQUIREMENTS:
+- "title": Compelling, SEO-friendly article title (50-100 characters)
+- "slug": URL-friendly slug derived from title (lowercase, hyphens only)
+- "excerpt": 2-3 sentence summary for preview cards (150-200 characters)
+- "body": Full article in markdown format with ## headings, code blocks, lists (minimum 1000 characters)
+- "category": MUST be one of: Engineering, Tech, Tutorials, Study Guides, Certification Tips, News, Product
+- "readingTime": Estimated minutes to read (calculate: word count / 200)
+- "sources": Array of 2-3 credible reference URLs with titles`
+    : contentType === 'exercise'
+    ? `FIELD REQUIREMENTS:
+- "title": Clear, descriptive exercise name
+- "slug": URL-friendly slug (lowercase, hyphens only)
+- "excerpt": Brief description of what the exercise teaches
+- "body": Full markdown problem description with examples
+- "starterCode": JavaScript/TypeScript starter code with helpful comments
+- "solutionCode": Complete working solution
+- "difficulty": MUST be one of: Beginner, Intermediate, Advanced
+- "sources": Array of reference documentation URLs`
+    : `FIELD REQUIREMENTS:
+- "questionText": Clear, complete question text
+- "options": Array of exactly 4 plausible answer options
+- "correctAnswer": Index (0-3) of the correct option
+- "explanation": Detailed explanation of why the answer is correct
+- "sources": Array of reference documentation URLs`;
+
   try {
     const completion = await groq.chat.completions.create({
       messages: [
@@ -141,15 +168,20 @@ async function generateWithGroq(userPrompt: string, systemPrompt: string, conten
           role: 'system',
           content: `${systemPrompt}
 
-You MUST respond with valid JSON matching this EXACT structure:
+OUTPUT FORMAT: You MUST respond with ONLY a valid JSON object.
+
+EXACT JSON STRUCTURE REQUIRED:
 ${jsonTemplate}
 
-CRITICAL REQUIREMENTS:
-- Include ALL fields shown above
-- The "sources" field MUST be an array of objects with "title" and "url" properties
-- Do not add any extra fields
-- Do not wrap in markdown code blocks
-- Output raw JSON only`,
+${fieldRequirements}
+
+CRITICAL RULES:
+1. Output ONLY raw JSON - no markdown, no code fences, no explanatory text
+2. Include ALL fields shown in the structure above
+3. Every string field MUST have a non-empty value
+4. The "sources" array MUST contain at least one object with "title" and "url"
+5. Escape special characters in strings properly (quotes, newlines, etc.)
+6. For markdown content in "body", use \\n for newlines`,
         },
         {
           role: 'user',
@@ -158,16 +190,18 @@ CRITICAL REQUIREMENTS:
       ],
       model: 'llama-3.3-70b-versatile',
       temperature: 0.7,
-      max_tokens: 4096,
+      max_tokens: 8192, // Increased to ensure complete content generation
       response_format: { type: 'json_object' },
     });
 
     const content = completion.choices[0]?.message?.content || '';
     console.log('[Groq] Response length:', content.length);
+    console.log('[Groq] Response preview:', content.substring(0, 200));
     return content;
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorObj = error as { message?: string };
     console.error('[Groq] Full error:', error);
-    const message = error?.message || String(error);
+    const message = errorObj?.message || String(error);
 
     if (message.includes('invalid_api_key') || message.includes('401')) {
       throw new Error('Invalid Groq API key. Please check your GROQ_API_KEY.');
@@ -175,71 +209,267 @@ CRITICAL REQUIREMENTS:
     if (message.includes('rate_limit') || message.includes('429')) {
       throw new Error('Groq rate limit exceeded. Try switching to Gemini or wait a moment.');
     }
-    // Pass through the full error for debugging
     throw new Error(`Groq error: ${message}`);
   }
 }
 
-// Parse JSON from AI response - both providers use JSON mode for reliable output
-function parseAIResponse(text: string): GeneratedContent {
+// Utility: Generate URL-friendly slug from title
+function generateSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 80);
+}
+
+// Utility: Calculate reading time from body content
+function calculateReadingTime(body: string): number {
+  const wordsPerMinute = 200;
+  const wordCount = body.split(/\s+/).filter(w => w.length > 0).length;
+  return Math.max(1, Math.ceil(wordCount / wordsPerMinute));
+}
+
+// Utility: Sanitize and validate sources array
+function sanitizeSources(sources: unknown): Array<{ title: string; url: string }> {
+  if (!Array.isArray(sources)) {
+    console.warn('[Sanitize] Sources is not an array, returning empty');
+    return [];
+  }
+
+  return sources
+    .filter((source): source is { title: string; url: string } => {
+      if (!source || typeof source !== 'object') return false;
+      const s = source as Record<string, unknown>;
+      return typeof s.title === 'string' && typeof s.url === 'string' &&
+             s.title.trim().length > 0 && s.url.trim().length > 0;
+    })
+    .map(source => ({
+      title: source.title.trim(),
+      url: source.url.trim(),
+    }));
+}
+
+// Validate and sanitize blog content with smart defaults
+function validateBlogContent(parsed: Record<string, unknown>): GeneratedBlogContent {
+  const title = typeof parsed.title === 'string' && parsed.title.trim()
+    ? parsed.title.trim()
+    : null;
+
+  const body = typeof parsed.body === 'string' && parsed.body.trim()
+    ? parsed.body.trim()
+    : null;
+
+  // Title and body are absolutely required - cannot generate defaults
+  if (!title) {
+    throw new Error('Generated content is missing a title. Please try again with a more specific prompt.');
+  }
+  if (!body) {
+    throw new Error('Generated content is missing body text. Please try again with a more specific prompt.');
+  }
+
+  // Generate slug from title if missing
+  const slug = typeof parsed.slug === 'string' && parsed.slug.trim()
+    ? parsed.slug.trim()
+    : generateSlug(title);
+
+  // Generate excerpt from body if missing (first ~150 chars)
+  const excerpt = typeof parsed.excerpt === 'string' && parsed.excerpt.trim()
+    ? parsed.excerpt.trim()
+    : body.replace(/[#*`]/g, '').substring(0, 150).trim() + '...';
+
+  // Default category if missing or invalid
+  const validCategories = ['Engineering', 'Tech', 'Tutorials', 'Study Guides', 'Certification Tips', 'News', 'Product'];
+  let category = typeof parsed.category === 'string' ? parsed.category.trim() : 'Tech';
+  if (!validCategories.includes(category)) {
+    // Try to find a close match
+    const lowerCategory = category.toLowerCase();
+    const match = validCategories.find(c => c.toLowerCase().includes(lowerCategory) || lowerCategory.includes(c.toLowerCase()));
+    category = match || 'Tech';
+  }
+
+  // Calculate reading time if missing or invalid
+  let readingTime = typeof parsed.readingTime === 'number' ? parsed.readingTime : null;
+  if (!readingTime || readingTime < 1 || readingTime > 60) {
+    readingTime = calculateReadingTime(body);
+  }
+
+  const sources = sanitizeSources(parsed.sources);
+
+  console.log('[Validate] Blog content validated:');
+  console.log('[Validate]   - Title:', title.substring(0, 50));
+  console.log('[Validate]   - Slug:', slug);
+  console.log('[Validate]   - Body length:', body.length);
+  console.log('[Validate]   - Category:', category);
+  console.log('[Validate]   - Reading time:', readingTime);
+  console.log('[Validate]   - Sources:', sources.length);
+
+  return { title, slug, excerpt, body, category, readingTime, sources };
+}
+
+// Validate and sanitize exercise content with smart defaults
+function validateExerciseContent(parsed: Record<string, unknown>): GeneratedExerciseContent {
+  const title = typeof parsed.title === 'string' && parsed.title.trim()
+    ? parsed.title.trim()
+    : null;
+
+  const body = typeof parsed.body === 'string' && parsed.body.trim()
+    ? parsed.body.trim()
+    : null;
+
+  const starterCode = typeof parsed.starterCode === 'string' && parsed.starterCode.trim()
+    ? parsed.starterCode.trim()
+    : null;
+
+  const solutionCode = typeof parsed.solutionCode === 'string' && parsed.solutionCode.trim()
+    ? parsed.solutionCode.trim()
+    : null;
+
+  if (!title) {
+    throw new Error('Generated exercise is missing a title.');
+  }
+  if (!body) {
+    throw new Error('Generated exercise is missing problem description.');
+  }
+  if (!starterCode) {
+    throw new Error('Generated exercise is missing starter code.');
+  }
+  if (!solutionCode) {
+    throw new Error('Generated exercise is missing solution code.');
+  }
+
+  const slug = typeof parsed.slug === 'string' && parsed.slug.trim()
+    ? parsed.slug.trim()
+    : generateSlug(title);
+
+  const excerpt = typeof parsed.excerpt === 'string' && parsed.excerpt.trim()
+    ? parsed.excerpt.trim()
+    : body.replace(/[#*`]/g, '').substring(0, 150).trim() + '...';
+
+  const validDifficulties = ['Beginner', 'Intermediate', 'Advanced'];
+  let difficulty = typeof parsed.difficulty === 'string' ? parsed.difficulty.trim() : 'Intermediate';
+  if (!validDifficulties.includes(difficulty)) {
+    const lowerDiff = difficulty.toLowerCase();
+    const match = validDifficulties.find(d => d.toLowerCase() === lowerDiff);
+    difficulty = match || 'Intermediate';
+  }
+
+  const sources = sanitizeSources(parsed.sources);
+
+  return { title, slug, excerpt, body, starterCode, solutionCode, difficulty, sources };
+}
+
+// Validate and sanitize question content
+function validateQuestionContent(parsed: Record<string, unknown>): GeneratedQuestionContent {
+  const questionText = typeof parsed.questionText === 'string' && parsed.questionText.trim()
+    ? parsed.questionText.trim()
+    : null;
+
+  if (!questionText) {
+    throw new Error('Generated question is missing question text.');
+  }
+
+  // Validate options array
+  if (!Array.isArray(parsed.options) || parsed.options.length < 2) {
+    throw new Error('Generated question must have at least 2 options.');
+  }
+
+  const options = parsed.options
+    .slice(0, 4)
+    .map(opt => typeof opt === 'string' ? opt.trim() : String(opt));
+
+  // Ensure we have exactly 4 options, padding if necessary
+  while (options.length < 4) {
+    options.push(`Option ${options.length + 1}`);
+  }
+
+  // Validate correct answer index
+  let correctAnswer = typeof parsed.correctAnswer === 'number' ? parsed.correctAnswer : 0;
+  if (correctAnswer < 0 || correctAnswer >= options.length) {
+    correctAnswer = 0;
+  }
+
+  const explanation = typeof parsed.explanation === 'string' && parsed.explanation.trim()
+    ? parsed.explanation.trim()
+    : 'The correct answer is option ' + (correctAnswer + 1) + '.';
+
+  const sources = sanitizeSources(parsed.sources);
+
+  return { questionText, options, correctAnswer, explanation, sources };
+}
+
+// Detect content type from parsed response
+function detectContentType(parsed: Record<string, unknown>): 'blog' | 'exercise' | 'question' {
+  if ('questionText' in parsed) return 'question';
+  if ('starterCode' in parsed || 'solutionCode' in parsed) return 'exercise';
+  return 'blog';
+}
+
+// Parse JSON from AI response with comprehensive validation and sanitization
+function parseAIResponse(text: string, expectedType?: ContentType): GeneratedContent {
   console.log('[Parse] Starting parse, input length:', text?.length || 0);
 
   // Handle empty response
   if (!text || text.trim().length === 0) {
     console.error('[Parse] Empty response received');
-    throw new Error('AI returned an empty response. Please try again.');
+    throw new Error('AI returned an empty response. Please try regenerating.');
   }
 
   // Clean up response - remove markdown code fences if present
   let jsonStr = text.trim();
-  console.log('[Parse] After trim, length:', jsonStr.length);
 
-  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (jsonMatch) {
-    console.log('[Parse] Found markdown code fence, extracting...');
-    jsonStr = jsonMatch[1].trim();
+  // Try multiple patterns to extract JSON from potential markdown
+  const patterns = [
+    /```json\s*([\s\S]*?)```/,
+    /```\s*([\s\S]*?)```/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = jsonStr.match(pattern);
+    if (match) {
+      console.log('[Parse] Extracted JSON from markdown code fence');
+      jsonStr = match[1].trim();
+      break;
+    }
   }
 
-  // Find JSON object if there's extra text
-  const objectMatch = jsonStr.match(/\{[\s\S]*\}/);
-  if (objectMatch) {
-    jsonStr = objectMatch[0];
+  // Find JSON object boundaries (handles extra text before/after)
+  const objectStart = jsonStr.indexOf('{');
+  const objectEnd = jsonStr.lastIndexOf('}');
+
+  if (objectStart !== -1 && objectEnd !== -1 && objectEnd > objectStart) {
+    jsonStr = jsonStr.substring(objectStart, objectEnd + 1);
   }
 
   console.log('[Parse] Final JSON length:', jsonStr.length);
-  console.log('[Parse] First 300 chars:', jsonStr.substring(0, 300));
 
-  // Parse JSON - both providers use JSON mode so this should work
+  // Parse JSON
+  let parsed: Record<string, unknown>;
   try {
-    const parsed = JSON.parse(jsonStr);
-    console.log('[Parse] JSON.parse succeeded');
-    console.log('[Parse] Parsed keys:', Object.keys(parsed));
+    parsed = JSON.parse(jsonStr);
+    console.log('[Parse] JSON.parse succeeded, keys:', Object.keys(parsed));
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown parse error';
+    console.error('[Parse] JSON.parse failed:', errorMessage);
+    console.error('[Parse] First 500 chars:', jsonStr.substring(0, 500));
+    throw new Error(`AI returned invalid JSON: ${errorMessage}. Please try regenerating.`);
+  }
 
-    // Validate that we have the required content field
-    if (!parsed.body && !parsed.questionText) {
-      console.error('[Parse] Missing content field. Keys present:', Object.keys(parsed));
-      throw new Error('Response missing required content field (body or questionText)');
-    }
+  // Detect content type if not provided
+  const contentType = expectedType || detectContentType(parsed);
+  console.log('[Parse] Content type:', contentType);
 
-    console.log('[Parse] Validation passed, returning content');
-    console.log('[Parse] Title:', parsed.title);
-    console.log('[Parse] Body length:', parsed.body?.length || 0);
-    return parsed as GeneratedContent;
-  } catch (error: any) {
-    console.error('[Parse] JSON.parse failed');
-    console.error('[Parse] Error type:', error.constructor.name);
-    console.error('[Parse] Error message:', error.message);
-    console.error('[Parse] First 500 chars of input:', jsonStr.substring(0, 500));
-
-    // Provide a more helpful error message
-    if (error.message.includes('Unexpected token')) {
-      throw new Error(`AI returned malformed JSON: ${error.message}`);
-    }
-    if (error.message.includes('missing')) {
-      throw new Error(error.message);
-    }
-
-    throw new Error(`Failed to parse AI response: ${error.message}`);
+  // Validate and sanitize based on content type
+  switch (contentType) {
+    case 'blog':
+      return validateBlogContent(parsed);
+    case 'exercise':
+      return validateExerciseContent(parsed);
+    case 'question':
+      return validateQuestionContent(parsed);
+    default:
+      return validateBlogContent(parsed);
   }
 }
 
@@ -272,8 +502,11 @@ export async function generateContent(
   }
 
   console.log('[Generate] Got raw text, length:', text?.length || 0);
-  const result = parseAIResponse(text);
-  console.log('[Generate] Parse complete, returning result');
+
+  // Parse with content type for proper validation and defaults
+  const result = parseAIResponse(text, contentType);
+  console.log('[Generate] Parse and validation complete');
+
   return result;
 }
 
