@@ -11,7 +11,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.970.0",
     "@aws-sdk/s3-request-presigner": "^3.970.0",
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^1.0.1",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

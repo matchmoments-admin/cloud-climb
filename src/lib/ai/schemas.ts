@@ -1,42 +1,158 @@
-import type { ContentType } from './system-prompts';
-import { SchemaType, type Schema } from '@google/generative-ai';
+/**
+ * AI Content Generation Schemas
+ *
+ * Uses Zod for runtime validation and manual JSON Schema for Gemini API
+ * Zod v4 is not compatible with zod-to-json-schema, so we define JSON schemas manually
+ */
 
-// Blog content schema
-export const blogSchema: Schema = {
-  type: SchemaType.OBJECT,
+import { z } from 'zod';
+import type { ContentType } from './system-prompts';
+
+// ============================================================================
+// ZOD SCHEMAS - For runtime validation
+// ============================================================================
+
+export const blogSchema = z.object({
+  title: z
+    .string()
+    .min(1, 'Title is required'),
+
+  slug: z
+    .string()
+    .min(1, 'Slug is required'),
+
+  excerpt: z
+    .string()
+    .min(1, 'Excerpt is required'),
+
+  body: z
+    .string()
+    .min(100, 'Body must be at least 100 characters'),
+
+  category: z.string(),
+
+  readingTime: z
+    .number()
+    .int()
+    .positive(),
+
+  sources: z.array(
+    z.object({
+      title: z.string().min(1),
+      url: z.string(),
+    })
+  ),
+});
+
+export const exerciseSchema = z.object({
+  title: z
+    .string()
+    .min(1, 'Title is required'),
+
+  slug: z
+    .string()
+    .min(1, 'Slug is required'),
+
+  excerpt: z
+    .string()
+    .min(1, 'Excerpt is required'),
+
+  body: z
+    .string()
+    .min(50, 'Body must describe the problem'),
+
+  starterCode: z.string(),
+
+  solutionCode: z.string(),
+
+  difficulty: z.enum(['Beginner', 'Intermediate', 'Advanced']),
+
+  sources: z.array(
+    z.object({
+      title: z.string().min(1),
+      url: z.string(),
+    })
+  ),
+});
+
+export const questionSchema = z.object({
+  questionText: z
+    .string()
+    .min(1, 'Question text is required'),
+
+  options: z
+    .array(z.string())
+    .length(4, 'Must have exactly 4 options'),
+
+  correctAnswer: z
+    .number()
+    .int()
+    .min(0)
+    .max(3),
+
+  explanation: z
+    .string()
+    .min(1, 'Explanation is required'),
+
+  sources: z.array(
+    z.object({
+      title: z.string().min(1),
+      url: z.string(),
+    })
+  ),
+});
+
+// ============================================================================
+// TYPE EXPORTS
+// ============================================================================
+
+export type GeneratedBlogContent = z.infer<typeof blogSchema>;
+export type GeneratedExerciseContent = z.infer<typeof exerciseSchema>;
+export type GeneratedQuestionContent = z.infer<typeof questionSchema>;
+export type GeneratedContent =
+  | GeneratedBlogContent
+  | GeneratedExerciseContent
+  | GeneratedQuestionContent;
+
+// ============================================================================
+// JSON SCHEMAS FOR GEMINI API - Manually defined for compatibility
+// ============================================================================
+
+const blogJsonSchema = {
+  type: 'object',
   properties: {
     title: {
-      type: SchemaType.STRING,
-      description: 'Article title, compelling and SEO-friendly',
+      type: 'string',
+      description: 'Compelling blog post title',
     },
     slug: {
-      type: SchemaType.STRING,
-      description: 'URL-friendly slug using lowercase and hyphens',
+      type: 'string',
+      description: 'URL-friendly slug (lowercase, hyphens, no spaces)',
     },
     excerpt: {
-      type: SchemaType.STRING,
-      description: '2-3 sentence summary for preview cards',
+      type: 'string',
+      description: 'A 2-3 sentence summary of the article for preview cards',
     },
     body: {
-      type: SchemaType.STRING,
-      description: 'Full article content in markdown format with ## headings and code blocks',
+      type: 'string',
+      description: 'Full markdown content with ## headings, code blocks, and formatting',
     },
     category: {
-      type: SchemaType.STRING,
+      type: 'string',
       description: 'One of: Engineering, Tech, Tutorials, Study Guides, Certification Tips, News, Product',
     },
     readingTime: {
-      type: SchemaType.NUMBER,
+      type: 'integer',
       description: 'Estimated reading time in minutes',
     },
     sources: {
-      type: SchemaType.ARRAY,
-      description: 'Array of source references with titles and URLs',
+      type: 'array',
+      description: 'Reference sources used in the article',
       items: {
-        type: SchemaType.OBJECT,
+        type: 'object',
         properties: {
-          title: { type: SchemaType.STRING },
-          url: { type: SchemaType.STRING },
+          title: { type: 'string', description: 'Source name or title' },
+          url: { type: 'string', description: 'URL to the source' },
         },
         required: ['title', 'url'],
       },
@@ -45,45 +161,46 @@ export const blogSchema: Schema = {
   required: ['title', 'slug', 'excerpt', 'body', 'category', 'readingTime', 'sources'],
 };
 
-// Exercise content schema
-export const exerciseSchema: Schema = {
-  type: SchemaType.OBJECT,
+const exerciseJsonSchema = {
+  type: 'object',
   properties: {
     title: {
-      type: SchemaType.STRING,
-      description: 'Exercise name',
+      type: 'string',
+      description: 'Exercise title',
     },
     slug: {
-      type: SchemaType.STRING,
+      type: 'string',
       description: 'URL-friendly slug',
     },
     excerpt: {
-      type: SchemaType.STRING,
-      description: 'Brief description of what the exercise teaches',
+      type: 'string',
+      description: 'Brief description of what this exercise teaches',
     },
     body: {
-      type: SchemaType.STRING,
+      type: 'string',
       description: 'Full markdown description of the problem with examples',
     },
     starterCode: {
-      type: SchemaType.STRING,
-      description: 'JavaScript/TypeScript starter code with comments',
+      type: 'string',
+      description: 'JavaScript/TypeScript starter code with helpful comments',
     },
     solutionCode: {
-      type: SchemaType.STRING,
-      description: 'Complete working solution',
+      type: 'string',
+      description: 'Complete working solution code',
     },
     difficulty: {
-      type: SchemaType.STRING,
-      description: 'One of: Beginner, Intermediate, Advanced',
+      type: 'string',
+      enum: ['Beginner', 'Intermediate', 'Advanced'],
+      description: 'Difficulty level of the exercise',
     },
     sources: {
-      type: SchemaType.ARRAY,
+      type: 'array',
+      description: 'Reference documentation sources',
       items: {
-        type: SchemaType.OBJECT,
+        type: 'object',
         properties: {
-          title: { type: SchemaType.STRING },
-          url: { type: SchemaType.STRING },
+          title: { type: 'string' },
+          url: { type: 'string' },
         },
         required: ['title', 'url'],
       },
@@ -92,36 +209,38 @@ export const exerciseSchema: Schema = {
   required: ['title', 'slug', 'excerpt', 'body', 'starterCode', 'solutionCode', 'difficulty', 'sources'],
 };
 
-// Question content schema
-export const questionSchema: Schema = {
-  type: SchemaType.OBJECT,
+const questionJsonSchema = {
+  type: 'object',
   properties: {
     questionText: {
-      type: SchemaType.STRING,
-      description: 'The question text',
+      type: 'string',
+      description: 'The full question text',
     },
     options: {
-      type: SchemaType.ARRAY,
-      description: 'Array of 4 answer options',
-      items: {
-        type: SchemaType.STRING,
-      },
+      type: 'array',
+      description: 'Array of exactly 4 answer options',
+      items: { type: 'string' },
+      minItems: 4,
+      maxItems: 4,
     },
     correctAnswer: {
-      type: SchemaType.NUMBER,
+      type: 'integer',
       description: 'Index (0-3) of the correct answer',
+      minimum: 0,
+      maximum: 3,
     },
     explanation: {
-      type: SchemaType.STRING,
-      description: 'Detailed explanation of the correct answer',
+      type: 'string',
+      description: 'Detailed explanation of why the correct answer is right',
     },
     sources: {
-      type: SchemaType.ARRAY,
+      type: 'array',
+      description: 'Reference sources for the question',
       items: {
-        type: SchemaType.OBJECT,
+        type: 'object',
         properties: {
-          title: { type: SchemaType.STRING },
-          url: { type: SchemaType.STRING },
+          title: { type: 'string' },
+          url: { type: 'string' },
         },
         required: ['title', 'url'],
       },
@@ -130,8 +249,26 @@ export const questionSchema: Schema = {
   required: ['questionText', 'options', 'correctAnswer', 'explanation', 'sources'],
 };
 
-// Get schema by content type (for Gemini)
-export function getSchemaForContentType(contentType: ContentType): Schema {
+/**
+ * Get JSON Schema for Gemini API's responseSchema parameter
+ */
+export function getJsonSchemaForContentType(contentType: ContentType) {
+  switch (contentType) {
+    case 'blog':
+      return blogJsonSchema;
+    case 'exercise':
+      return exerciseJsonSchema;
+    case 'question':
+      return questionJsonSchema;
+    default:
+      return blogJsonSchema;
+  }
+}
+
+/**
+ * Get Zod schema for runtime validation of AI responses
+ */
+export function getZodSchemaForContentType(contentType: ContentType) {
   switch (contentType) {
     case 'blog':
       return blogSchema;
@@ -144,12 +281,15 @@ export function getSchemaForContentType(contentType: ContentType): Schema {
   }
 }
 
-// JSON templates for Groq (doesn't support schema enforcement, needs explicit examples)
+// ============================================================================
+// JSON TEMPLATES FOR GROQ
+// ============================================================================
+
 const BLOG_JSON_TEMPLATE = `{
   "title": "Your article title here",
   "slug": "url-friendly-slug-here",
   "excerpt": "A 2-3 sentence summary of the article for preview cards.",
-  "body": "Full markdown content with ## headings, code blocks, and formatting.",
+  "body": "Full markdown content with ## headings, code blocks, and formatting. Include substantial content.",
   "category": "One of: Engineering, Tech, Tutorials, Study Guides, Certification Tips, News, Product",
   "readingTime": 5,
   "sources": [
@@ -180,7 +320,6 @@ const QUESTION_JSON_TEMPLATE = `{
   ]
 }`;
 
-// Get JSON template for Groq prompts (string format for prompt injection)
 export function getJsonTemplateForContentType(contentType: ContentType): string {
   switch (contentType) {
     case 'blog':
