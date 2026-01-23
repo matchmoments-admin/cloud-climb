@@ -61,6 +61,31 @@ function getGroqClient() {
 // GEMINI GENERATION - Using new SDK with JSON Schema
 // ============================================================================
 
+// Retry configuration
+const GEMINI_MAX_RETRIES = 3;
+const GEMINI_INITIAL_DELAY_MS = 1000;
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if an error is retryable (transient failure)
+ */
+function isRetryableError(message: string): boolean {
+  const retryablePatterns = [
+    '500', '502', '503', '504',  // Server errors
+    'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND',  // Network errors
+    'timeout', 'network',  // Timeout/network issues
+    'temporarily', 'overloaded',  // Temporary issues
+  ];
+  const lowerMessage = message.toLowerCase();
+  return retryablePatterns.some(pattern => lowerMessage.includes(pattern.toLowerCase()));
+}
+
 async function generateWithGemini(
   prompt: string,
   contentType: ContentType
@@ -75,54 +100,73 @@ async function generateWithGemini(
   console.log('[Gemini] Using JSON Schema');
   console.log('[Gemini] Schema preview:', JSON.stringify(jsonSchema).substring(0, 200));
 
-  try {
-    console.log('[Gemini] Sending request...');
+  let lastError: Error | null = null;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: jsonSchema as Parameters<typeof ai.models.generateContent>[0]['config'] extends { responseSchema?: infer T } ? T : never,
-      },
-    });
+  for (let attempt = 1; attempt <= GEMINI_MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[Gemini] Sending request (attempt ${attempt}/${GEMINI_MAX_RETRIES})...`);
 
-    // The new SDK returns text directly via response.text
-    const text = response.text;
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        // Use structured contents for more consistent output
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: jsonSchema as Parameters<typeof ai.models.generateContent>[0]['config'] extends { responseSchema?: infer T } ? T : never,
+        },
+      });
 
-    console.log('[Gemini] Response received');
-    console.log('[Gemini] Response length:', text?.length || 0);
-    console.log('[Gemini] Response preview:', text?.substring(0, 300));
+      // The new SDK returns text directly via response.text
+      const text = response.text;
 
-    if (!text || text.trim().length === 0) {
-      throw new Error('Gemini returned an empty response. Please try again.');
+      console.log('[Gemini] Response received');
+      console.log('[Gemini] Response length:', text?.length || 0);
+      console.log('[Gemini] Response preview:', text?.substring(0, 300));
+
+      if (!text || text.trim().length === 0) {
+        throw new Error('Gemini returned an empty response. Please try again.');
+      }
+
+      return text;
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      const message = err?.message || String(error);
+      console.error(`[Gemini] Attempt ${attempt} failed:`, message);
+      lastError = new Error(message);
+
+      // Don't retry for non-retryable errors
+      if (!isRetryableError(message)) {
+        // Provide specific error messages for common issues
+        if (message.includes('API_KEY_INVALID') || message.includes('API key not valid')) {
+          throw new Error('Invalid Gemini API key. Please check your GEMINI_API_KEY.');
+        }
+        if (message.includes('quota') || message.includes('rate limit') || message.includes('429')) {
+          throw new Error('Gemini rate limit exceeded. Try switching to Groq or wait a moment.');
+        }
+        if (message.includes('safety') || message.includes('blocked') || message.includes('SAFETY')) {
+          throw new Error('Content blocked by Gemini safety filters. Try rephrasing your prompt.');
+        }
+        if (message.includes('RECITATION')) {
+          throw new Error('Content blocked due to copyright concerns. Try a more original prompt.');
+        }
+        if (message.includes('schema') || message.includes('Schema')) {
+          throw new Error(`Gemini schema error: ${message}. The schema format may be incorrect.`);
+        }
+
+        throw new Error(`Gemini error: ${message}`);
+      }
+
+      // Wait before retry with exponential backoff
+      if (attempt < GEMINI_MAX_RETRIES) {
+        const delay = GEMINI_INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+        console.log(`[Gemini] Retrying in ${delay}ms...`);
+        await sleep(delay);
+      }
     }
-
-    return text;
-  } catch (error: unknown) {
-    const err = error as { message?: string };
-    console.error('[Gemini] Generation failed:', err?.message || error);
-    const message = err?.message || String(error);
-
-    // Provide specific error messages for common issues
-    if (message.includes('API_KEY_INVALID') || message.includes('API key not valid')) {
-      throw new Error('Invalid Gemini API key. Please check your GEMINI_API_KEY.');
-    }
-    if (message.includes('quota') || message.includes('rate limit') || message.includes('429')) {
-      throw new Error('Gemini rate limit exceeded. Try switching to Groq or wait a moment.');
-    }
-    if (message.includes('safety') || message.includes('blocked') || message.includes('SAFETY')) {
-      throw new Error('Content blocked by Gemini safety filters. Try rephrasing your prompt.');
-    }
-    if (message.includes('RECITATION')) {
-      throw new Error('Content blocked due to copyright concerns. Try a more original prompt.');
-    }
-    if (message.includes('schema') || message.includes('Schema')) {
-      throw new Error(`Gemini schema error: ${message}. The schema format may be incorrect.`);
-    }
-
-    throw new Error(`Gemini error: ${message}`);
   }
+
+  // All retries exhausted
+  throw new Error(`Gemini error after ${GEMINI_MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
 // ============================================================================
@@ -196,7 +240,7 @@ CRITICAL RULES:
         },
       ],
       model: 'llama-3.3-70b-versatile',
-      temperature: 0.7,
+      temperature: 0.2, // Lower temperature for more reliable JSON output
       max_tokens: 8192,
       response_format: { type: 'json_object' },
     });
@@ -228,6 +272,47 @@ CRITICAL RULES:
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
+
+/**
+ * Extract the first complete JSON value from a string using brace-matching.
+ * This is more reliable than regex for handling nested braces in strings.
+ */
+function extractFirstJsonValue(input: string): string | null {
+  const s = input.replace(/^\uFEFF/, '').trimStart(); // strip BOM, keep leading text handling
+
+  const startObj = s.indexOf('{');
+  const startArr = s.indexOf('[');
+  const start =
+    startObj === -1 ? startArr :
+    startArr === -1 ? startObj :
+    Math.min(startObj, startArr);
+
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+
+    if (inString) {
+      if (escape) { escape = false; continue; }
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') { inString = true; continue; }
+
+    if (ch === '{' || ch === '[') depth++;
+    if (ch === '}' || ch === ']') depth--;
+
+    if (depth === 0) return s.slice(start, i + 1).trim();
+  }
+
+  return null;
+}
 
 function generateSlug(title: string): string {
   return title
@@ -286,25 +371,38 @@ function parseAIResponse(
     throw new Error('AI returned an empty response. Please try again.');
   }
 
-  let jsonStr = text.trim();
-  console.log('[Parse] After trim, length:', jsonStr.length);
+  // Strip BOM and trim - BOM can cause JSON parse errors at position 0
+  let jsonStr = text.replace(/^\uFEFF/, '').trim();
+  console.log('[Parse] After BOM strip and trim, length:', jsonStr.length);
 
-  // Remove markdown code fences if present (common with some models)
-  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (jsonMatch) {
-    console.log('[Parse] Found markdown code fence, extracting...');
-    jsonStr = jsonMatch[1].trim();
+  // Only strip markdown code fences if they wrap the ENTIRE response (at the start)
+  // Important: Don't match code fences inside JSON content (e.g., in markdown body fields)
+  if (jsonStr.startsWith('```')) {
+    console.log('[Parse] Found markdown code fence at start, extracting...');
+    const jsonMatch = jsonStr.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1].trim();
+    }
   }
 
-  // Try to find JSON object if there's extra text
-  const objectMatch = jsonStr.match(/\{[\s\S]*\}/);
-  if (objectMatch && objectMatch[0] !== jsonStr) {
-    console.log('[Parse] Extracted JSON object from response');
-    jsonStr = objectMatch[0];
+  // If response doesn't start with { or [, extract first complete JSON value using brace-matching
+  // This is more reliable than greedy regex which can grab wrong slice when {} exists in strings
+  if (!jsonStr.startsWith('{') && !jsonStr.startsWith('[')) {
+    console.log('[Parse] Response does not start with JSON, extracting first JSON value...');
+    const extracted = extractFirstJsonValue(jsonStr);
+    if (extracted) {
+      jsonStr = extracted;
+    }
   }
 
   console.log('[Parse] Final JSON length:', jsonStr.length);
   console.log('[Parse] First 300 chars:', jsonStr.substring(0, 300));
+
+  // Debug: Check for control characters that can break JSON parsing
+  const ctrl = /[\u0000-\u001F\u007F]/.exec(jsonStr);
+  if (ctrl && ctrl[0] !== '\n' && ctrl[0] !== '\r' && ctrl[0] !== '\t') {
+    console.error('[Parse] Control char found:', ctrl[0], 'charCode:', ctrl[0].charCodeAt(0));
+  }
 
   // Debug: Log character codes for first few characters
   if (jsonStr.length > 0) {
