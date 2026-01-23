@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { getSalesforceClient } from '@/lib/salesforce/client';
 import { mapArticle } from '@/lib/mappers/article-mapper';
 import { mapToSalesforce } from '@/lib/mappers/article-mapper';
@@ -151,14 +152,33 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Admin Articles] Created article: ${articleId}`);
 
-    // Invalidate caches
+    // Invalidate Redis caches
     await invalidateArticleCaches();
+
+    // Trigger Next.js on-demand revalidation
+    revalidatePath('/'); // Homepage shows latest articles
+    revalidatePath(`/${sfData.Slug__c}`); // New article page
+
+    // Revalidate category page if category is set
+    if (sfData.Category__c) {
+      const categorySlug = String(sfData.Category__c).toLowerCase().replace(/\s+/g, '-');
+      revalidatePath(`/category/${categorySlug}`);
+    }
+
+    // Revalidate article type pages
+    if (sfData.Article_Type__c === 'Tutorial') {
+      revalidatePath('/tutorials');
+    } else if (sfData.Article_Type__c === 'Exercise') {
+      revalidatePath('/exercises');
+    }
+
+    console.log(`[Admin Articles] Revalidated pages for article: ${sfData.Slug__c}`);
 
     return NextResponse.json({
       success: true,
       id: articleId,
       slug: sfData.Slug__c,
-      message: 'Article created successfully',
+      message: 'Article created and pages revalidated successfully',
     });
   } catch (error: any) {
     console.error('[Admin Articles POST] Error:', error.message, error);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { getSalesforceClient } from '@/lib/salesforce/client';
 import { mapArticle, mapToSalesforceUpdate } from '@/lib/mappers/article-mapper';
 import { validateArticleUpdate } from '@/lib/validations/article';
@@ -97,9 +98,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     const input = validation.data!;
 
-    // Check if article exists
+    // Check if article exists and get current data for revalidation
     const client = getSalesforceClient();
-    const existingQuery = `SELECT Id, Slug__c FROM Article__c WHERE Id = '${id}' LIMIT 1`;
+    const existingQuery = `SELECT Id, Slug__c, Category__c, Article_Type__c FROM Article__c WHERE Id = '${id}' LIMIT 1`;
     const existing = await client.query<SF_Article__c>(existingQuery);
 
     if (existing.length === 0) {
@@ -109,8 +110,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const oldArticle = existing[0];
+    const oldSlug = oldArticle.Slug__c;
+    const oldCategory = oldArticle.Category__c;
+    const oldArticleType = oldArticle.Article_Type__c;
+
     // If slug is being changed, check uniqueness
-    if (input.slug && input.slug !== existing[0].Slug__c) {
+    if (input.slug && input.slug !== oldSlug) {
       const slugCheck = await client.query<SF_Article__c>(
         `SELECT Id FROM Article__c WHERE Slug__c = '${input.slug}' AND Id != '${id}' LIMIT 1`
       );
@@ -131,13 +137,46 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     console.log(`[Admin Article] Updated article: ${id}`);
 
-    // Invalidate caches
+    // Invalidate Redis caches
     await invalidateArticleCaches();
+
+    // Trigger Next.js on-demand revalidation
+    revalidatePath('/'); // Homepage
+
+    // Revalidate old slug URL if slug changed
+    if (oldSlug) {
+      revalidatePath(`/${oldSlug}`);
+    }
+
+    // Revalidate new/current slug URL
+    const currentSlug = input.slug || oldSlug;
+    if (currentSlug) {
+      revalidatePath(`/${currentSlug}`);
+    }
+
+    // Revalidate category pages (old and new if changed)
+    if (oldCategory) {
+      const oldCategorySlug = String(oldCategory).toLowerCase().replace(/\s+/g, '-');
+      revalidatePath(`/category/${oldCategorySlug}`);
+    }
+    if (input.category && input.category !== oldCategory) {
+      const newCategorySlug = input.category.toLowerCase().replace(/\s+/g, '-');
+      revalidatePath(`/category/${newCategorySlug}`);
+    }
+
+    // Revalidate article type pages (article type is immutable, use existing value)
+    if (oldArticleType === 'Tutorial') {
+      revalidatePath('/tutorials');
+    } else if (oldArticleType === 'Exercise') {
+      revalidatePath('/exercises');
+    }
+
+    console.log(`[Admin Article] Revalidated pages for article: ${id}`);
 
     return NextResponse.json({
       success: true,
       id,
-      message: 'Article updated successfully',
+      message: 'Article updated and pages revalidated successfully',
     });
   } catch (error: any) {
     console.error('[Admin Article PATCH] Error:', error.message);
@@ -165,8 +204,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
     const client = getSalesforceClient();
 
-    // Get article to find associated images
-    const query = `SELECT Id, Header_Image_URL__c, Body__c FROM Article__c WHERE Id = '${id}' LIMIT 1`;
+    // Get article data for cleanup and revalidation
+    const query = `SELECT Id, Slug__c, Category__c, Article_Type__c, Header_Image_URL__c, Body__c FROM Article__c WHERE Id = '${id}' LIMIT 1`;
     const records = await client.query<SF_Article__c>(query);
 
     if (records.length === 0) {
@@ -177,6 +216,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     const article = records[0];
+    const { Slug__c: slug, Category__c: category, Article_Type__c: articleType } = article;
 
     // Delete article from Salesforce
     await client.delete('Article__c', id);
@@ -200,13 +240,36 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     // TODO: Extract and delete inline images from Body__c
     // This would require parsing the HTML and extracting image URLs
 
-    // Invalidate caches
+    // Invalidate Redis caches
     await invalidateArticleCaches();
+
+    // Trigger Next.js on-demand revalidation
+    revalidatePath('/'); // Homepage
+
+    // Revalidate the deleted article's page (will now 404)
+    if (slug) {
+      revalidatePath(`/${slug}`);
+    }
+
+    // Revalidate category page
+    if (category) {
+      const categorySlug = String(category).toLowerCase().replace(/\s+/g, '-');
+      revalidatePath(`/category/${categorySlug}`);
+    }
+
+    // Revalidate article type pages
+    if (articleType === 'Tutorial') {
+      revalidatePath('/tutorials');
+    } else if (articleType === 'Exercise') {
+      revalidatePath('/exercises');
+    }
+
+    console.log(`[Admin Article] Revalidated pages after deleting article: ${id}`);
 
     return NextResponse.json({
       success: true,
       id,
-      message: 'Article deleted successfully',
+      message: 'Article deleted and pages revalidated successfully',
     });
   } catch (error: any) {
     console.error('[Admin Article DELETE] Error:', error.message);
