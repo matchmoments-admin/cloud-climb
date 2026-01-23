@@ -32,6 +32,55 @@ const CATEGORIES = [
 
 const STATUSES = ['Draft', 'Pending Review', 'Published', 'Archived'];
 
+// Collapsible section component for mobile-friendly settings
+function CollapsibleSection({
+  title,
+  icon,
+  children,
+  defaultOpen = false,
+  className = ''
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  className?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <div className={`collapsible-section ${isOpen ? 'is-open' : ''} ${className}`}>
+      <button
+        type="button"
+        className="collapsible-section-header"
+        onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
+      >
+        <span className="collapsible-section-icon">{icon}</span>
+        <span className="collapsible-section-title">{title}</span>
+        <svg
+          className="collapsible-section-chevron"
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div className="collapsible-section-content">
+        <div className="collapsible-section-inner">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ArticleForm({ article, mode }: ArticleFormProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -135,10 +184,29 @@ export function ArticleForm({ article, mode }: ArticleFormProps) {
     }
   };
 
+  // Icons for collapsible sections
+  const publishIcon = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 19V5M5 12l7-7 7 7"/>
+    </svg>
+  );
+
+  const organizationIcon = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </svg>
+  );
+
+  const seoIcon = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+  );
+
   return (
-    <form onSubmit={handleSubmit} className="article-form">
-      {/* AI Content Generator */}
-      <div className="article-form-ai">
+    <form onSubmit={handleSubmit} className="article-form-v2">
+      {/* AI Content Generator - Always visible */}
+      <div className="article-form-ai-section">
         <AIGenerationPanel
           onApplyBlogContent={handleApplyBlogContent}
           onApplyExerciseContent={handleApplyExerciseContent}
@@ -146,131 +214,65 @@ export function ArticleForm({ article, mode }: ArticleFormProps) {
         />
       </div>
 
-      <div className="article-form-main">
-        {/* Title */}
-        <div className="form-field">
-          <label htmlFor="title" className="form-label">
-            Title <span className="required">*</span>
-          </label>
-          <input
-            id="title"
-            type="text"
-            value={formData.title}
-            onChange={(e) => updateField('title', e.target.value)}
-            placeholder="Enter article title"
-            className="input input-lg"
-            required
-          />
-        </div>
+      {/* Mobile Settings Panel - Collapsible on mobile, sidebar on desktop */}
+      <div className="article-form-settings">
+        <CollapsibleSection
+          title="Publish Settings"
+          icon={publishIcon}
+          defaultOpen={false}
+          className="settings-publish"
+        >
+          <div className="settings-grid">
+            <div className="form-field">
+              <label htmlFor="status" className="form-label">
+                Status
+              </label>
+              <select
+                id="status"
+                value={formData.status}
+                onChange={(e) => updateField('status', e.target.value)}
+                className="input"
+              >
+                {STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        {/* Subtitle */}
-        <div className="form-field">
-          <label htmlFor="subtitle" className="form-label">
-            Subtitle
-          </label>
-          <input
-            id="subtitle"
-            type="text"
-            value={formData.subtitle}
-            onChange={(e) => updateField('subtitle', e.target.value)}
-            placeholder="Brief subtitle or deck"
-            className="input"
-          />
-        </div>
-
-        {/* Featured Image */}
-        <div className="form-field">
-          <label className="form-label">Featured Image</label>
-          <ImagePicker
-            value={formData.headerImageUrl || undefined}
-            onChange={(url) => updateField('headerImageUrl', url || '')}
-          />
-        </div>
-
-        {/* Body - TipTap Editor */}
-        <div className="form-field">
-          <label className="form-label">
-            Content <span className="required">*</span>
-          </label>
-          <TipTapEditor
-            content={formData.body}
-            onChange={(html) => updateField('body', html)}
-            placeholder="Write your article content..."
-          />
-        </div>
-
-        {/* Excerpt */}
-        <div className="form-field">
-          <label htmlFor="excerpt" className="form-label">
-            Excerpt
-          </label>
-          <textarea
-            id="excerpt"
-            value={formData.excerpt}
-            onChange={(e) => updateField('excerpt', e.target.value)}
-            placeholder="Brief summary for cards and SEO (auto-generated if left empty)"
-            className="input"
-            rows={3}
-          />
-          <p className="form-hint">
-            Leave empty to auto-generate from content
-          </p>
-        </div>
-      </div>
-
-      {/* Sidebar */}
-      <div className="article-form-sidebar">
-        {/* Publish Settings */}
-        <div className="form-card">
-          <h3 className="form-card-title">Publish</h3>
-
-          <div className="form-field">
-            <label htmlFor="status" className="form-label">
-              Status
-            </label>
-            <select
-              id="status"
-              value={formData.status}
-              onChange={(e) => updateField('status', e.target.value)}
-              className="input"
-            >
-              {STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
+            <div className="form-field">
+              <label htmlFor="articleDate" className="form-label">
+                Publish Date
+              </label>
+              <input
+                id="articleDate"
+                type="date"
+                value={formData.articleDate}
+                onChange={(e) => updateField('articleDate', e.target.value)}
+                className="input"
+              />
+            </div>
           </div>
 
           <div className="form-field">
-            <label htmlFor="articleDate" className="form-label">
-              Publish Date
-            </label>
-            <input
-              id="articleDate"
-              type="date"
-              value={formData.articleDate}
-              onChange={(e) => updateField('articleDate', e.target.value)}
-              className="input"
-            />
-          </div>
-
-          <div className="form-field">
-            <label className="form-checkbox">
+            <label className="form-checkbox form-checkbox-lg">
               <input
                 type="checkbox"
                 checked={formData.isFeatured}
                 onChange={(e) => updateField('isFeatured', e.target.checked)}
               />
-              <span>Featured article</span>
+              <span>Feature this article on homepage</span>
             </label>
           </div>
-        </div>
+        </CollapsibleSection>
 
-        {/* Category & Tags */}
-        <div className="form-card">
-          <h3 className="form-card-title">Organization</h3>
-
+        <CollapsibleSection
+          title="Category & Tags"
+          icon={organizationIcon}
+          defaultOpen={false}
+          className="settings-organization"
+        >
           <div className="form-field">
             <label htmlFor="category" className="form-label">
               Category <span className="required">*</span>
@@ -305,12 +307,14 @@ export function ArticleForm({ article, mode }: ArticleFormProps) {
             />
             <p className="form-hint">Comma-separated tags</p>
           </div>
-        </div>
+        </CollapsibleSection>
 
-        {/* URL & SEO */}
-        <div className="form-card">
-          <h3 className="form-card-title">URL & SEO</h3>
-
+        <CollapsibleSection
+          title="URL & SEO"
+          icon={seoIcon}
+          defaultOpen={false}
+          className="settings-seo"
+        >
           <div className="form-field">
             <label htmlFor="slug" className="form-label">
               URL Slug
@@ -352,29 +356,113 @@ export function ArticleForm({ article, mode }: ArticleFormProps) {
               className="input"
             />
           </div>
+        </CollapsibleSection>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="article-form-content">
+        {/* Title */}
+        <div className="form-field form-field-title">
+          <label htmlFor="title" className="form-label">
+            Title <span className="required">*</span>
+          </label>
+          <input
+            id="title"
+            type="text"
+            value={formData.title}
+            onChange={(e) => updateField('title', e.target.value)}
+            placeholder="Enter article title"
+            className="input input-title"
+            required
+          />
+        </div>
+
+        {/* Subtitle */}
+        <div className="form-field">
+          <label htmlFor="subtitle" className="form-label">
+            Subtitle
+          </label>
+          <input
+            id="subtitle"
+            type="text"
+            value={formData.subtitle}
+            onChange={(e) => updateField('subtitle', e.target.value)}
+            placeholder="Brief subtitle or deck"
+            className="input"
+          />
+        </div>
+
+        {/* Featured Image */}
+        <div className="form-field">
+          <label className="form-label">Featured Image</label>
+          <ImagePicker
+            value={formData.headerImageUrl || undefined}
+            onChange={(url) => updateField('headerImageUrl', url || '')}
+          />
+        </div>
+
+        {/* Body - TipTap Editor */}
+        <div className="form-field form-field-editor">
+          <label className="form-label">
+            Content <span className="required">*</span>
+          </label>
+          <TipTapEditor
+            content={formData.body}
+            onChange={(html) => updateField('body', html)}
+            placeholder="Write your article content..."
+          />
+        </div>
+
+        {/* Excerpt */}
+        <div className="form-field">
+          <label htmlFor="excerpt" className="form-label">
+            Excerpt
+          </label>
+          <textarea
+            id="excerpt"
+            value={formData.excerpt}
+            onChange={(e) => updateField('excerpt', e.target.value)}
+            placeholder="Brief summary for cards and SEO (auto-generated if left empty)"
+            className="input"
+            rows={3}
+          />
+          <p className="form-hint">
+            Leave empty to auto-generate from content
+          </p>
         </div>
       </div>
 
-      {/* Form Actions */}
-      <div className="article-form-actions">
-        {error && <p className="form-error">{error}</p>}
+      {/* Sticky Action Bar */}
+      <div className="article-form-actions-bar">
+        <div className="article-form-actions-inner">
+          {error && <p className="form-error-inline">{error}</p>}
 
-        <div className="article-form-buttons">
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="btn btn-secondary"
-            disabled={saving}
-          >
-            Cancel
-          </button>
-          <button type="submit" className="btn btn-teal" disabled={saving}>
-            {saving
-              ? 'Saving...'
-              : mode === 'create'
-                ? 'Create Article'
-                : 'Save Changes'}
-          </button>
+          <div className="article-form-actions-buttons">
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="btn btn-secondary btn-action"
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-teal btn-action btn-primary-action"
+              disabled={saving}
+            >
+              {saving ? (
+                <>
+                  <span className="btn-spinner" />
+                  Saving...
+                </>
+              ) : mode === 'create' ? (
+                'Create Article'
+              ) : (
+                'Save Changes'
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </form>
