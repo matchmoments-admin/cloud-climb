@@ -1154,6 +1154,32 @@ a:hover {
   gap: var(--spacing-lg);
 }
 
+/* Tablet: 768px - 1024px */
+@media (max-width: 900px) {
+  .admin-page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-md);
+  }
+
+  .admin-page-header .btn {
+    width: 100%;
+    justify-content: center;
+    padding: 14px 20px; /* Larger touch target */
+  }
+}
+
+/* Mobile: < 600px */
+@media (max-width: 600px) {
+  .admin-page-title {
+    font-size: 22px;
+  }
+
+  .admin-page-header .btn {
+    padding: 16px 20px; /* Even larger for mobile */
+  }
+}
+
 .admin-page-title {
   font-family: var(--font-display);
   font-size: 28px;
@@ -1398,6 +1424,18 @@ a:hover {
   display: flex;
   justify-content: flex-end;
   gap: var(--spacing-md);
+}
+
+@media (max-width: 600px) {
+  .article-form-buttons {
+    flex-direction: column-reverse;
+    gap: var(--spacing-sm);
+  }
+
+  .article-form-buttons .btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 /* Form Fields */

@@ -66,7 +66,10 @@ export const articleCreateSchema = z.object({
     .default([]),
   headerImageUrl: z
     .string()
-    .url('Invalid image URL')
+    .transform(val => val?.trim() === '' ? null : val)
+    .refine(val => val === null || z.string().url().safeParse(val).success, {
+      message: 'Invalid image URL'
+    })
     .optional()
     .nullable(),
   authorName: z

@@ -102,9 +102,9 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error('[Admin Articles GET] Error:', error.message);
+    console.error('[Admin Articles GET] Error:', error.message, error);
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch articles' },
+      { success: false, error: error.message || 'Failed to fetch articles' },
       { status: 500 }
     );
   }
@@ -161,9 +161,9 @@ export async function POST(request: NextRequest) {
       message: 'Article created successfully',
     });
   } catch (error: any) {
-    console.error('[Admin Articles POST] Error:', error.message);
+    console.error('[Admin Articles POST] Error:', error.message, error);
     return NextResponse.json(
-      { success: false, error: 'Failed to create article' },
+      { success: false, error: error.message || 'Failed to create article' },
       { status: 500 }
     );
   }
