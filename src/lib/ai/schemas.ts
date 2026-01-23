@@ -155,10 +155,12 @@ const blogJsonSchema = {
           url: { type: 'string', description: 'URL to the source' },
         },
         required: ['title', 'url'],
+        additionalProperties: false,
       },
     },
   },
   required: ['title', 'slug', 'excerpt', 'body', 'category', 'readingTime', 'sources'],
+  additionalProperties: false,
 };
 
 const exerciseJsonSchema = {
@@ -203,10 +205,12 @@ const exerciseJsonSchema = {
           url: { type: 'string' },
         },
         required: ['title', 'url'],
+        additionalProperties: false,
       },
     },
   },
   required: ['title', 'slug', 'excerpt', 'body', 'starterCode', 'solutionCode', 'difficulty', 'sources'],
+  additionalProperties: false,
 };
 
 const questionJsonSchema = {
@@ -243,10 +247,12 @@ const questionJsonSchema = {
           url: { type: 'string' },
         },
         required: ['title', 'url'],
+        additionalProperties: false,
       },
     },
   },
   required: ['questionText', 'options', 'correctAnswer', 'explanation', 'sources'],
+  additionalProperties: false,
 };
 
 /**

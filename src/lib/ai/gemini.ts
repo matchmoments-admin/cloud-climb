@@ -306,7 +306,7 @@ function extractFirstJsonValue(input: string): string | null {
     if (ch === '"') { inString = true; continue; }
 
     if (ch === '{' || ch === '[') depth++;
-    if (ch === '}' || ch === ']') depth--;
+    if (ch === '}' || ch === ']') depth = Math.max(0, depth - 1); // Guard against underflow
 
     if (depth === 0) return s.slice(start, i + 1).trim();
   }
@@ -390,17 +390,19 @@ function parseAIResponse(
   if (!jsonStr.startsWith('{') && !jsonStr.startsWith('[')) {
     console.log('[Parse] Response does not start with JSON, extracting first JSON value...');
     const extracted = extractFirstJsonValue(jsonStr);
-    if (extracted) {
-      jsonStr = extracted;
+    if (!extracted) {
+      throw new Error('AI response did not contain a valid JSON object/array.');
     }
+    jsonStr = extracted;
   }
 
   console.log('[Parse] Final JSON length:', jsonStr.length);
   console.log('[Parse] First 300 chars:', jsonStr.substring(0, 300));
 
   // Debug: Check for control characters that can break JSON parsing
-  const ctrl = /[\u0000-\u001F\u007F]/.exec(jsonStr);
-  if (ctrl && ctrl[0] !== '\n' && ctrl[0] !== '\r' && ctrl[0] !== '\t') {
+  // Exclude whitespace controls (\t=0x09, \n=0x0A, \r=0x0D) from the check
+  const ctrl = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.exec(jsonStr);
+  if (ctrl) {
     console.error('[Parse] Control char found:', ctrl[0], 'charCode:', ctrl[0].charCodeAt(0));
   }
 
