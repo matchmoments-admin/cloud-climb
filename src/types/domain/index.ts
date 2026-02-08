@@ -14,6 +14,7 @@ export interface Article {
   body: string;
   excerpt: string;
   featuredImage: string;
+  featuredImageCaption?: string; // Attribution text for stock photos
   category: string;
   tags: string[];
   author: Author;

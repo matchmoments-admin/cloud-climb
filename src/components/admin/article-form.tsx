@@ -95,6 +95,7 @@ export function ArticleForm({ article, mode }: ArticleFormProps) {
     category: article?.category || '',
     tags: article?.tags.join(', ') || '',
     headerImageUrl: article?.featuredImage || '',
+    headerImageCaption: article?.featuredImageCaption || '',
     authorName: article?.author.name || '',
     status: 'Draft',
     isPublished: false,
@@ -397,7 +398,14 @@ export function ArticleForm({ article, mode }: ArticleFormProps) {
           <label className="form-label">Featured Image</label>
           <ImagePicker
             value={formData.headerImageUrl || undefined}
-            onChange={(url) => updateField('headerImageUrl', url || '')}
+            caption={formData.headerImageCaption || undefined}
+            onChange={(url, caption) => {
+              setFormData((prev) => ({
+                ...prev,
+                headerImageUrl: url || '',
+                headerImageCaption: caption || '',
+              }));
+            }}
           />
         </div>
 

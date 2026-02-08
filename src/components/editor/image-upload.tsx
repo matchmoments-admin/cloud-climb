@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import imageCompression from 'browser-image-compression';
+import type { LummiImage } from '@/lib/lummi';
 
-type ImageUploadMode = 'upload' | 'url' | 'generate';
+type ImageUploadMode = 'upload' | 'url' | 'generate' | 'stock';
 type AspectRatio = '1:1' | '16:9' | '3:2' | '4:3' | '9:16';
 
 interface ImageUploadModalProps {
-  onUpload: (url: string) => void;
+  onUpload: (url: string, caption?: string) => void;
   onClose: () => void;
 }
 
@@ -16,7 +17,7 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [urlInput, setUrlInput] = useState('');
-  const [mode, setMode] = useState<ImageUploadMode>('upload');
+  const [mode, setMode] = useState<ImageUploadMode>('stock');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Generate mode state
@@ -24,6 +25,27 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
   const [generating, setGenerating] = useState(false);
   const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
+
+  // Stock photo mode state
+  const [stockQuery, setStockQuery] = useState('');
+  const [stockImages, setStockImages] = useState<LummiImage[]>([]);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockSearched, setStockSearched] = useState(false);
+  const [lummiAvailable, setLummiAvailable] = useState<boolean | null>(null);
+
+  // Check if Lummi is available on mount
+  useEffect(() => {
+    async function checkLummi() {
+      try {
+        const response = await fetch('/api/lummi-search?random=true&limit=1');
+        const data = await response.json();
+        setLummiAvailable(data.success || data.code !== 'NOT_CONFIGURED');
+      } catch {
+        setLummiAvailable(false);
+      }
+    }
+    checkLummi();
+  }, []);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -70,8 +92,9 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
         }
 
         onUpload(data.url);
-      } catch (err: any) {
-        setError(err.message || 'Failed to upload image');
+      } catch (err: unknown) {
+        const e = err as { message?: string };
+        setError(e.message || 'Failed to upload image');
       } finally {
         setUploading(false);
       }
@@ -167,6 +190,46 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
     }
   }, [generatedPreview, onUpload]);
 
+  // Stock photo search
+  const handleStockSearch = useCallback(async () => {
+    if (!stockQuery.trim()) {
+      setError('Please enter a search term');
+      return;
+    }
+
+    setStockLoading(true);
+    setError(null);
+    setStockSearched(true);
+
+    try {
+      const response = await fetch(
+        `/api/lummi-search?q=${encodeURIComponent(stockQuery.trim())}&limit=20`
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to search photos');
+      }
+
+      setStockImages(data.images || []);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setError(e.message || 'Failed to search photos');
+      setStockImages([]);
+    } finally {
+      setStockLoading(false);
+    }
+  }, [stockQuery]);
+
+  const handleSelectStockImage = useCallback(
+    (image: LummiImage) => {
+      // Use Lummi's hosted URL directly
+      const caption = `Photo by ${image.author.name} on Lummi`;
+      onUpload(image.url, caption);
+    },
+    [onUpload]
+  );
+
   return (
     <div className="toolbar-modal-overlay" onClick={onClose}>
       <div
@@ -190,6 +253,28 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
 
         {/* Mode tabs */}
         <div className="image-upload-tabs">
+          {lummiAvailable && (
+            <button
+              type="button"
+              className={`image-upload-tab ${mode === 'stock' ? 'active' : ''}`}
+              onClick={() => { setMode('stock'); setError(null); }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                style={{ marginRight: '4px', verticalAlign: 'middle' }}
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+              Stock Photos
+            </button>
+          )}
           <button
             type="button"
             className={`image-upload-tab ${mode === 'upload' ? 'active' : ''}`}
@@ -224,7 +309,91 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
           </button>
         </div>
 
-        {mode === 'upload' ? (
+        {mode === 'stock' ? (
+          <div className="stock-photo-content">
+            <div className="stock-photo-search">
+              <input
+                type="text"
+                value={stockQuery}
+                onChange={(e) => setStockQuery(e.target.value)}
+                placeholder="Search free AI stock photos..."
+                className="input"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleStockSearch();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleStockSearch}
+                className="btn btn-teal"
+                disabled={stockLoading || !stockQuery.trim()}
+              >
+                {stockLoading ? (
+                  <div className="upload-spinner" />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="m21 21-4.35-4.35" />
+                  </svg>
+                )}
+              </button>
+            </div>
+
+            {stockLoading ? (
+              <div className="stock-photo-loading">
+                <div className="upload-spinner" />
+                <span>Searching photos...</span>
+              </div>
+            ) : stockImages.length > 0 ? (
+              <div className="stock-photo-grid">
+                {stockImages.map((image) => (
+                  <button
+                    key={image.id}
+                    type="button"
+                    className="stock-photo-item"
+                    onClick={() => handleSelectStockImage(image)}
+                    title={`Photo by ${image.author.name}`}
+                  >
+                    <img
+                      src={image.thumbnailUrl || image.url}
+                      alt={image.title || `Photo by ${image.author.name}`}
+                      loading="lazy"
+                    />
+                    <div className="stock-photo-overlay">
+                      <span className="stock-photo-author">
+                        {image.author.name}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : stockSearched ? (
+              <div className="stock-photo-empty">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21 15 16 10 5 21" />
+                </svg>
+                <p>No photos found for &ldquo;{stockQuery}&rdquo;</p>
+                <p className="stock-photo-hint">Try different keywords</p>
+              </div>
+            ) : (
+              <div className="stock-photo-empty">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.35-4.35" />
+                </svg>
+                <p>Search for free AI stock photos</p>
+                <p className="stock-photo-hint">
+                  Powered by Lummi. Attribution included automatically.
+                </p>
+              </div>
+            )}
+          </div>
+        ) : mode === 'upload' ? (
           <>
             <input
               ref={fileInputRef}
@@ -397,16 +566,17 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
 // Standalone image picker button for forms (featured image)
 interface ImagePickerProps {
   value?: string;
-  onChange: (url: string | null) => void;
+  caption?: string;
+  onChange: (url: string | null, caption?: string) => void;
   className?: string;
 }
 
-export function ImagePicker({ value, onChange, className }: ImagePickerProps) {
+export function ImagePicker({ value, caption, onChange, className }: ImagePickerProps) {
   const [showModal, setShowModal] = useState(false);
 
   const handleUpload = useCallback(
-    (url: string) => {
-      onChange(url);
+    (url: string, imageCaption?: string) => {
+      onChange(url, imageCaption);
       setShowModal(false);
     },
     [onChange]
@@ -417,6 +587,9 @@ export function ImagePicker({ value, onChange, className }: ImagePickerProps) {
       {value ? (
         <div className="image-picker-preview">
           <img src={value} alt="Selected" className="image-picker-img" />
+          {caption && (
+            <p className="image-picker-caption">{caption}</p>
+          )}
           <div className="image-picker-actions">
             <button
               type="button"
