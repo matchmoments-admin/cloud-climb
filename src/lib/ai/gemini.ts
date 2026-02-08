@@ -306,9 +306,10 @@ function extractFirstJsonValue(input: string): string | null {
     if (ch === '"') { inString = true; continue; }
 
     if (ch === '{' || ch === '[') depth++;
-    if (ch === '}' || ch === ']') depth = Math.max(0, depth - 1); // Guard against underflow
+    else if (ch === '}' || ch === ']') depth--;
 
     if (depth === 0) return s.slice(start, i + 1).trim();
+    if (depth < 0) return null; // corrupted/unbalanced
   }
 
   return null;
@@ -675,6 +676,110 @@ export async function generateContent(
   console.log('[Generate] Parse and validation complete');
 
   return result;
+}
+
+// ============================================================================
+// IMAGE GENERATION
+// ============================================================================
+
+export type ImageAspectRatio = '1:1' | '16:9' | '3:2' | '4:3' | '9:16';
+
+/**
+ * Generate an image using Gemini's image generation model
+ * @param prompt - Description of the image to generate
+ * @param aspectRatio - Aspect ratio for the generated image (default: 16:9 for blog headers)
+ * @returns Base64 image data and MIME type
+ */
+export async function generateImage(
+  prompt: string,
+  aspectRatio: ImageAspectRatio = '16:9'
+): Promise<{ imageData: string; mimeType: string }> {
+  console.log('[Gemini Image] Starting image generation...');
+  console.log('[Gemini Image] Prompt:', prompt.substring(0, 100));
+  console.log('[Gemini Image] Aspect ratio:', aspectRatio);
+
+  const ai = getGeminiClient();
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= GEMINI_MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[Gemini Image] Sending request (attempt ${attempt}/${GEMINI_MAX_RETRIES})...`);
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash-exp',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          responseModalities: ['IMAGE'],
+          imageConfig: {
+            aspectRatio,
+          },
+        } as Parameters<typeof ai.models.generateContent>[0]['config'],
+      });
+
+      // Extract image data from response
+      const candidates = response.candidates;
+      if (!candidates || candidates.length === 0) {
+        throw new Error('No candidates returned from Gemini image generation');
+      }
+
+      const parts = candidates[0].content?.parts;
+      if (!parts || parts.length === 0) {
+        throw new Error('No parts in Gemini image response');
+      }
+
+      // Find the image part
+      const imagePart = parts.find(
+        (part) => 'inlineData' in part && part.inlineData?.data
+      );
+
+      if (!imagePart || !('inlineData' in imagePart) || !imagePart.inlineData) {
+        throw new Error('No image data in Gemini response');
+      }
+
+      const { data, mimeType } = imagePart.inlineData;
+      if (!data || !mimeType) {
+        throw new Error('Invalid image data structure in response');
+      }
+
+      console.log('[Gemini Image] Image generated successfully');
+      console.log('[Gemini Image] MIME type:', mimeType);
+      console.log('[Gemini Image] Data length:', data.length);
+
+      return { imageData: data, mimeType };
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      const message = err?.message || String(error);
+      console.error(`[Gemini Image] Attempt ${attempt} failed:`, message);
+      lastError = new Error(message);
+
+      // Don't retry for non-retryable errors
+      if (!isRetryableError(message)) {
+        if (message.includes('API_KEY_INVALID') || message.includes('API key not valid')) {
+          throw new Error('Invalid Gemini API key. Please check your GEMINI_API_KEY.');
+        }
+        if (message.includes('quota') || message.includes('rate limit') || message.includes('429')) {
+          throw new Error('Gemini rate limit exceeded. Please wait a moment and try again.');
+        }
+        if (message.includes('safety') || message.includes('blocked') || message.includes('SAFETY')) {
+          throw new Error('Image blocked by safety filters. Try a different prompt.');
+        }
+        if (message.includes('IMAGE_GENERATION_FAILED')) {
+          throw new Error('Image generation failed. Try a more descriptive prompt.');
+        }
+
+        throw new Error(`Gemini image error: ${message}`);
+      }
+
+      // Wait before retry with exponential backoff
+      if (attempt < GEMINI_MAX_RETRIES) {
+        const delay = GEMINI_INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+        console.log(`[Gemini Image] Retrying in ${delay}ms...`);
+        await sleep(delay);
+      }
+    }
+  }
+
+  throw new Error(`Gemini image generation failed after ${GEMINI_MAX_RETRIES} attempts: ${lastError?.message}`);
 }
 
 // ============================================================================

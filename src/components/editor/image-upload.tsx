@@ -3,6 +3,9 @@
 import { useState, useRef, useCallback } from 'react';
 import imageCompression from 'browser-image-compression';
 
+type ImageUploadMode = 'upload' | 'url' | 'generate';
+type AspectRatio = '1:1' | '16:9' | '3:2' | '4:3' | '9:16';
+
 interface ImageUploadModalProps {
   onUpload: (url: string) => void;
   onClose: () => void;
@@ -13,8 +16,14 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [urlInput, setUrlInput] = useState('');
-  const [mode, setMode] = useState<'upload' | 'url'>('upload');
+  const [mode, setMode] = useState<ImageUploadMode>('upload');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Generate mode state
+  const [generatePrompt, setGeneratePrompt] = useState('');
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
+  const [generating, setGenerating] = useState(false);
+  const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -117,6 +126,47 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
     }
   }, [urlInput, onUpload]);
 
+  const handleGenerate = useCallback(async () => {
+    if (!generatePrompt.trim()) {
+      setError('Please enter a description for the image');
+      return;
+    }
+
+    setGenerating(true);
+    setError(null);
+    setGeneratedPreview(null);
+
+    try {
+      const response = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: generatePrompt.trim(),
+          aspectRatio,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate image');
+      }
+
+      setGeneratedPreview(data.url);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setError(e.message || 'Failed to generate image');
+    } finally {
+      setGenerating(false);
+    }
+  }, [generatePrompt, aspectRatio]);
+
+  const handleUseGeneratedImage = useCallback(() => {
+    if (generatedPreview) {
+      onUpload(generatedPreview);
+    }
+  }, [generatedPreview, onUpload]);
+
   return (
     <div className="toolbar-modal-overlay" onClick={onClose}>
       <div
@@ -143,16 +193,34 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
           <button
             type="button"
             className={`image-upload-tab ${mode === 'upload' ? 'active' : ''}`}
-            onClick={() => setMode('upload')}
+            onClick={() => { setMode('upload'); setError(null); }}
           >
             Upload
           </button>
           <button
             type="button"
             className={`image-upload-tab ${mode === 'url' ? 'active' : ''}`}
-            onClick={() => setMode('url')}
+            onClick={() => { setMode('url'); setError(null); }}
           >
             URL
+          </button>
+          <button
+            type="button"
+            className={`image-upload-tab ${mode === 'generate' ? 'active' : ''}`}
+            onClick={() => { setMode('generate'); setError(null); }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              style={{ marginRight: '4px', verticalAlign: 'middle' }}
+            >
+              <path d="M12 3l1.912 5.813L20 10.5l-4.588 3.939L17.175 21 12 17.25 6.825 21l1.763-6.561L4 10.5l6.088-1.687L12 3z" />
+            </svg>
+            Generate
           </button>
         </div>
 
@@ -204,7 +272,7 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
               )}
             </div>
           </>
-        ) : (
+        ) : mode === 'url' ? (
           <div className="image-upload-url">
             <input
               type="url"
@@ -228,6 +296,95 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
             >
               Insert
             </button>
+          </div>
+        ) : (
+          <div className="image-generate-content">
+            {generatedPreview ? (
+              <div className="image-generate-preview">
+                <img src={generatedPreview} alt="Generated preview" />
+                <div className="image-generate-preview-actions">
+                  <button
+                    type="button"
+                    onClick={handleUseGeneratedImage}
+                    className="btn btn-teal"
+                  >
+                    Use Image
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGeneratedPreview(null)}
+                    className="btn btn-secondary"
+                  >
+                    Generate New
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="image-generate-form">
+                  <label htmlFor="generate-prompt" className="image-generate-label">
+                    Describe the image you want to create
+                  </label>
+                  <textarea
+                    id="generate-prompt"
+                    value={generatePrompt}
+                    onChange={(e) => setGeneratePrompt(e.target.value)}
+                    placeholder="A serene mountain landscape at sunset with clouds..."
+                    className="image-generate-textarea"
+                    rows={3}
+                    disabled={generating}
+                  />
+                  <div className="image-generate-options">
+                    <label htmlFor="aspect-ratio" className="image-generate-label-inline">
+                      Aspect Ratio
+                    </label>
+                    <select
+                      id="aspect-ratio"
+                      value={aspectRatio}
+                      onChange={(e) => setAspectRatio(e.target.value as AspectRatio)}
+                      className="image-generate-select"
+                      disabled={generating}
+                    >
+                      <option value="16:9">16:9 (Landscape)</option>
+                      <option value="3:2">3:2 (Photo)</option>
+                      <option value="4:3">4:3 (Standard)</option>
+                      <option value="1:1">1:1 (Square)</option>
+                      <option value="9:16">9:16 (Portrait)</option>
+                    </select>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  className="btn btn-teal image-generate-btn"
+                  disabled={!generatePrompt.trim() || generating}
+                >
+                  {generating ? (
+                    <>
+                      <div className="upload-spinner" />
+                      <span>Generating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M12 3l1.912 5.813L20 10.5l-4.588 3.939L17.175 21 12 17.25 6.825 21l1.763-6.561L4 10.5l6.088-1.687L12 3z" />
+                      </svg>
+                      Generate Image
+                    </>
+                  )}
+                </button>
+                <p className="image-generate-hint">
+                  AI-generated images using Gemini. May take 10-20 seconds.
+                </p>
+              </>
+            )}
           </div>
         )}
 
@@ -295,7 +452,7 @@ export function ImagePicker({ value, onChange, className }: ImagePickerProps) {
             <circle cx="8.5" cy="8.5" r="1.5" />
             <polyline points="21 15 16 10 5 21" />
           </svg>
-          <span>Click to upload featured image</span>
+          <span>Add featured image</span>
         </button>
       )}
 
