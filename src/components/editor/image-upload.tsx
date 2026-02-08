@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
+import imageCompression from 'browser-image-compression';
 
 interface ImageUploadModalProps {
   onUpload: (url: string) => void;
@@ -22,8 +23,8 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
         setError('Please select an image file');
         return;
       }
-      if (file.size > 5 * 1024 * 1024) {
-        setError('Image must be under 5MB');
+      if (file.size > 10 * 1024 * 1024) {
+        setError('Image must be under 10MB');
         return;
       }
 
@@ -31,8 +32,22 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
       setError(null);
 
       try {
+        // Compress image before upload (skip for SVG/GIF)
+        let fileToUpload: File = file;
+        const skipCompression = file.type === 'image/svg+xml' || file.type === 'image/gif';
+
+        if (!skipCompression && file.size > 100 * 1024) {
+          // Only compress if larger than 100KB
+          fileToUpload = await imageCompression(file, {
+            maxSizeMB: 2, // Target max 2MB after compression
+            maxWidthOrHeight: 2400, // Max dimension
+            useWebWorker: true,
+            preserveExif: false,
+          });
+        }
+
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('file', fileToUpload);
 
         const response = await fetch('/api/upload', {
           method: 'POST',
@@ -183,7 +198,7 @@ export function ImageUploadModal({ onUpload, onClose }: ImageUploadModalProps) {
                     Drop image here or <strong>click to browse</strong>
                   </span>
                   <span className="upload-hint">
-                    Supports JPEG, PNG, WebP, GIF (max 5MB)
+                    Supports JPEG, PNG, WebP, GIF (auto-compressed)
                   </span>
                 </>
               )}

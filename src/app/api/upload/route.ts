@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import sharp from 'sharp';
 import {
   uploadToR2,
   generateImageKey,
@@ -41,21 +42,58 @@ export async function POST(request: NextRequest) {
 
     // Convert file to buffer
     const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const inputBuffer = Buffer.from(arrayBuffer);
+    let outputBuffer: Buffer = inputBuffer;
+    let contentType = file.type;
+    let outputFilename = file.name;
+
+    // Optimize images with sharp (skip SVG and GIF)
+    const skipOptimization =
+      file.type === 'image/svg+xml' || file.type === 'image/gif';
+
+    if (!skipOptimization) {
+      const image = sharp(inputBuffer);
+      const metadata = await image.metadata();
+
+      // Resize if too large (max 2400px on longest side)
+      const maxDimension = 2400;
+      if (
+        metadata.width &&
+        metadata.height &&
+        (metadata.width > maxDimension || metadata.height > maxDimension)
+      ) {
+        image.resize(maxDimension, maxDimension, {
+          fit: 'inside',
+          withoutEnlargement: true,
+        });
+      }
+
+      // Convert to WebP for optimal compression
+      outputBuffer = await image
+        .webp({
+          quality: 85,
+          effort: 4, // Balance between speed and compression
+        })
+        .toBuffer();
+
+      contentType = 'image/webp';
+      outputFilename = file.name.replace(/\.[^.]+$/, '.webp');
+    }
 
     // Generate unique storage key
-    const key = generateImageKey(file.name);
+    const key = generateImageKey(outputFilename);
 
     // Upload to R2
-    const url = await uploadToR2(buffer, key, file.type);
+    const url = await uploadToR2(outputBuffer, key, contentType);
 
     return NextResponse.json({
       success: true,
       url,
       key,
-      filename: file.name,
-      size: file.size,
-      contentType: file.type,
+      filename: outputFilename,
+      size: outputBuffer.length,
+      contentType,
+      originalSize: file.size,
     });
   } catch (error: any) {
     console.error('[Upload API] Error:', error);

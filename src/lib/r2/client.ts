@@ -206,9 +206,9 @@ export const ALLOWED_IMAGE_TYPES = [
 ];
 
 /**
- * Maximum file size (5MB)
+ * Maximum file size (10MB - will be compressed before storage)
  */
-export const MAX_FILE_SIZE = 5 * 1024 * 1024;
+export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 /**
  * Validate an image file for upload
