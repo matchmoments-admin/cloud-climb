@@ -92,6 +92,8 @@ export function mapArticle(sf: SF_Article__c | SF_Article__c_Extended): Article 
     readTime,
     viewCount: sf.View_Count__c || 0,
     isFeatured: sf.Is_Featured__c || false,
+    isPublished: sf.Is_Published__c || false,
+    status: sf.Status__c || 'Draft',
     isPremium: sf.Is_Premium__c || false,
     metaTitle: sf.Meta_Title__c,
     articleType: castArticleType(sf.Article_Type__c),

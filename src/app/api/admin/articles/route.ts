@@ -132,6 +132,11 @@ export async function POST(request: NextRequest) {
     // Map to Salesforce fields
     const sfData = mapToSalesforce(input);
 
+    // Debug: Log the data being sent to Salesforce
+    console.log('[Admin Articles] Input isPublished:', input.isPublished);
+    console.log('[Admin Articles] SF Data Is_Published__c:', sfData.Is_Published__c);
+    console.log('[Admin Articles] SF Data Status__c:', sfData.Status__c);
+
     // Check for slug uniqueness
     const client = getSalesforceClient();
     const slugValue = String(sfData.Slug__c || '');

@@ -97,8 +97,8 @@ export function ArticleForm({ article, mode }: ArticleFormProps) {
     headerImageUrl: article?.featuredImage || '',
     headerImageCaption: article?.featuredImageCaption || '',
     authorName: article?.author.name || '',
-    status: 'Draft',
-    isPublished: false,
+    status: article?.status || 'Draft',
+    isPublished: article?.isPublished || false,
     isFeatured: article?.isFeatured || false,
     articleDate: article?.publishedDate
       ? new Date(article.publishedDate).toISOString().split('T')[0]

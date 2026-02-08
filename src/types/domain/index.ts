@@ -22,6 +22,8 @@ export interface Article {
   readTime: number;
   viewCount: number;
   isFeatured: boolean;
+  isPublished?: boolean;
+  status?: string; // Draft, Pending Review, Published, Archived
   isPremium?: boolean;
   metaTitle?: string;
   metaDescription?: string;

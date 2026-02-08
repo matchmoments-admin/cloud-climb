@@ -132,6 +132,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // Map to Salesforce fields (only changed fields)
     const sfData = mapToSalesforceUpdate(input);
 
+    // Debug: Log the data being sent to Salesforce
+    console.log('[Admin Article PATCH] Input isPublished:', input.isPublished);
+    console.log('[Admin Article PATCH] Input status:', input.status);
+    console.log('[Admin Article PATCH] SF Data:', JSON.stringify(sfData, null, 2));
+
     // Update in Salesforce
     await client.update('Article__c', id, sfData);
 
